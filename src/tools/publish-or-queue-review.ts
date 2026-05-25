@@ -1,7 +1,11 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { createNotionClient } from "../lib/notion-client.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
+import { runProjectPreflight } from "../lib/notion-preflight.js";
+import { withNotionRetry } from "../lib/notion-retry.js";
+import { getStateStore } from "../lib/state-store.js";
 import { decidePublishingStatus } from "../notion/manual-entry.js";
 
 function normalizePublishingMode(mode: "conservative" | "balanced" | "fully_automatic") {
@@ -43,12 +47,53 @@ export function registerPublishOrQueueReviewTool(server: McpServer) {
       });
 
       try {
+        const store = getStateStore();
+        const project = await store.getProject(input.projectId);
+        if (!project) {
+          throw new Error("Unknown projectId. Run initialize_project_manual first.");
+        }
+
+        const notion = createNotionClient();
+        await runProjectPreflight({ notion, project });
+
         const status = decidePublishingStatus({
           mode: normalizePublishingMode(input.publishingMode),
           score: input.confidenceScore,
           threshold: input.autoPublishThreshold,
           hasContradiction: input.hasContradiction,
         });
+
+        const featureUpdatePayload = {
+          page_id: input.featureId,
+          properties: {
+            Status: { status: { name: status.status } },
+            "Confidence Score": { number: input.confidenceScore },
+          },
+        };
+
+        await withNotionRetry(() => notion.pages.update(featureUpdatePayload), {
+          operationName: "pages.update",
+          payload: featureUpdatePayload,
+        });
+
+        for (const manualEntryId of input.manualEntryIds) {
+          const manualEntryPayload = {
+            page_id: manualEntryId,
+            properties: {
+              Status: { status: { name: status.status } },
+              "Confidence Score": { number: input.confidenceScore },
+              "Publishing Decision": { select: { name: status.decision } },
+              ...(status.status === "Published"
+                ? { "Date Published": { date: { start: new Date().toISOString().slice(0, 10) } } }
+                : {}),
+            },
+          };
+
+          await withNotionRetry(() => notion.pages.update(manualEntryPayload), {
+            operationName: "pages.update",
+            payload: manualEntryPayload,
+          });
+        }
 
         logToolEvent({
           level: "info",

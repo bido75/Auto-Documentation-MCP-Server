@@ -220,7 +220,7 @@ export function registerPackageManualTool(server: McpServer) {
             releasePageId,
           });
 
-        const selectedAudience = input.audience === "both" ? "User" : input.audience === "user" ? "User" : "Admin";
+        const selectedAudience = input.audience === "both" ? "Both" : input.audience === "user" ? "User" : "Admin";
         const markdown = buildMarkdownManual({
         projectName: input.projectName ?? project.projectName,
         releaseVersion: input.releaseVersion,
@@ -256,6 +256,8 @@ export function registerPackageManualTool(server: McpServer) {
           ),
         );
 
+        let releasePageUrl: string | undefined;
+
         if (!releasePageId) {
         const createReleasePayload = {
           parent: { database_id: project.databases.releasesDatabaseId },
@@ -276,6 +278,9 @@ export function registerPackageManualTool(server: McpServer) {
             payload: createReleasePayload,
           });
           releasePageId = created.id;
+          if ("url" in created && typeof created.url === "string") {
+            releasePageUrl = created.url;
+          }
         }
 
         const updateReleasePayload = {
@@ -291,10 +296,18 @@ export function registerPackageManualTool(server: McpServer) {
         },
       };
 
-        await withNotionRetry(() => notion.pages.update(updateReleasePayload), {
+        const updatedRelease = await withNotionRetry(() => notion.pages.update(updateReleasePayload), {
           operationName: "pages.update",
           payload: updateReleasePayload,
         });
+
+        if (!releasePageUrl && "url" in updatedRelease && typeof updatedRelease.url === "string") {
+          releasePageUrl = updatedRelease.url;
+        }
+
+        if (!releasePageUrl && releasePageId) {
+          releasePageUrl = `https://notion.so/${releasePageId.replace(/-/g, "")}`;
+        }
 
         const manualEntryIds = input.manualEntryIds ?? sourceEntries.map((entry) => entry.pageId).filter((id) => id.length > 0);
 
@@ -327,6 +340,8 @@ export function registerPackageManualTool(server: McpServer) {
           },
         });
 
+        const output = input.format === "markdown" ? markdown : releasePageUrl;
+
         return {
           content: [
             {
@@ -339,10 +354,7 @@ export function registerPackageManualTool(server: McpServer) {
                   releasePageId,
                   includedEntryCount: includedCount,
                   excludedEntryCount: excludedCount,
-                  output:
-                    input.format === "markdown"
-                      ? markdown
-                      : `https://notion.so/manual/${input.projectId}/${encodeURIComponent(input.releaseVersion)}`,
+                  output,
                 },
                 null,
                 2,

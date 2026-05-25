@@ -10,11 +10,22 @@ interface ManualEntry {
 export function buildMarkdownManual(input: {
   projectName: string;
   releaseVersion: string;
-  audience: "User" | "Admin";
+  audience: "User" | "Admin" | "Both";
   entries: ManualEntry[];
 }) {
   const included = input.entries.filter(
-    (entry) => entry.status === "Published" && (entry.audience === input.audience || entry.audience === "Both"),
+    (entry) => {
+      const isEligibleStatus = entry.status === "Published" || entry.status === "Approved";
+      if (!isEligibleStatus) {
+        return false;
+      }
+
+      if (input.audience === "Both") {
+        return entry.audience === "User" || entry.audience === "Admin" || entry.audience === "Both";
+      }
+
+      return entry.audience === input.audience || entry.audience === "Both";
+    },
   );
 
   return [

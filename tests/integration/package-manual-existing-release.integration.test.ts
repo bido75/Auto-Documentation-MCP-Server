@@ -110,8 +110,8 @@ describe("package_manual existing release behavior", () => {
         return { results: [] };
       },
     );
-    const create = vi.fn(async () => ({ id: "release_page_new" }));
-    const update = vi.fn(async () => ({}));
+    const create = vi.fn(async () => ({ id: "release_page_new", url: "https://notion.local/release_page_new" }));
+    const update = vi.fn(async (input: { page_id: string }) => ({ id: input.page_id, url: `https://notion.local/${input.page_id}` }));
     const listBlocks = vi.fn(async () => ({ results: [] }));
 
     testContext.notion = {
@@ -136,7 +136,7 @@ describe("package_manual existing release behavior", () => {
     const pack = server.handlers.get("package_manual");
     expect(pack).toBeDefined();
 
-    const result = parseToolResult<{ releasePageId: string }>(
+    const result = parseToolResult<{ releasePageId: string; output: string; includedEntryCount: number }>(
       await pack!({
         projectId: "proj_1",
         releaseVersion: "1.0.0",
@@ -146,6 +146,9 @@ describe("package_manual existing release behavior", () => {
     );
 
     expect(result.releasePageId).toBe("release_page_existing");
+    expect(result.includedEntryCount).toBe(2);
+    expect(result.output).toContain("User thing");
+    expect(result.output).toContain("Admin thing");
     expect(create).not.toHaveBeenCalled();
 
     const releaseUpdateCall = update.mock.calls.find((call) => call[0].page_id === "release_page_existing");
@@ -169,5 +172,18 @@ describe("package_manual existing release behavior", () => {
         properties: { Release: { relation: [{ id: "release_page_existing" }] } },
       }),
     );
+
+    const notionPageResult = parseToolResult<{ output: string; format: string; releasePageId: string }>(
+      await pack!({
+        projectId: "proj_1",
+        releaseVersion: "1.0.0",
+        audience: "both",
+        format: "notion_page",
+      }),
+    );
+
+    expect(notionPageResult.format).toBe("notion_page");
+    expect(notionPageResult.releasePageId).toBe("release_page_existing");
+    expect(notionPageResult.output).toBe("https://notion.local/release_page_existing");
   });
 });
