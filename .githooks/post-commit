@@ -6,5 +6,9 @@ if [ "$branch" != "main" ]; then
   exit 0
 fi
 
-# Auto-push latest commit on main. Quietly skip if push fails.
-git push -u origin main >/dev/null 2>&1 || true
+# Auto-push latest commit on main and show actionable failures.
+if ! git push -u origin main; then
+  echo "[auto-push] push failed, retrying once in 2 seconds..." >&2
+  sleep 2
+  git push -u origin main
+fi

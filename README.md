@@ -34,6 +34,46 @@ npm run dev
 
 GitHub Actions runs typecheck, tests, and build on pushes and pull requests to `main`.
 
+## GitHub Push Setup (Required Once)
+
+This repository is configured to push through SSH.
+
+1. Confirm remote URL:
+
+```bash
+git remote -v
+```
+
+You should see `git@github.com:bido75/Auto-Documentation-MCP-Server.git`.
+
+2. Generate an SSH key (if needed):
+
+```bash
+ssh-keygen -t ed25519 -C "bido75@users.noreply.github.com"
+```
+
+3. Copy your public key:
+
+```bash
+cat ~/.ssh/id_ed25519.pub
+```
+
+4. Add the key in GitHub:
+
+- GitHub Settings -> SSH and GPG keys -> New SSH key
+
+5. Verify auth:
+
+```bash
+ssh -T git@github.com
+```
+
+6. Push:
+
+```bash
+git push -u origin main
+```
+
 ## Optional Auto-Push
 
 This repo includes a `post-commit` git hook in `.githooks/post-commit` that attempts to push after each commit on `main`.
@@ -44,4 +84,4 @@ Enable it locally:
 git config core.hooksPath .githooks
 ```
 
-Note: push still requires valid GitHub access for the configured remote.
+If push auth is not configured yet, the hook prints the error and retries once.
