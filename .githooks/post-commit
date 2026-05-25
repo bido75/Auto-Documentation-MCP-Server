@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+set -eu
+
+branch="$(git rev-parse --abbrev-ref HEAD)"
+if [ "$branch" != "main" ]; then
+  exit 0
+fi
+
+# Auto-push latest commit on main. Quietly skip if push fails.
+git push -u origin main >/dev/null 2>&1 || true

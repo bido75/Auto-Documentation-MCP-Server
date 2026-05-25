@@ -33,3 +33,15 @@ npm run dev
 ## CI
 
 GitHub Actions runs typecheck, tests, and build on pushes and pull requests to `main`.
+
+## Optional Auto-Push
+
+This repo includes a `post-commit` git hook in `.githooks/post-commit` that attempts to push after each commit on `main`.
+
+Enable it locally:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Note: push still requires valid GitHub access for the configured remote.
