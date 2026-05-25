@@ -74,6 +74,9 @@ function Invoke-WithDetailedErrors {
     elseif ($statusCode -eq 403) {
       Write-Error "GitHub API returned 403 Forbidden. Ensure Administration: Read and write permission on $Owner/$Repo."
     }
+    elseif ($statusCode -eq 404) {
+      Write-Error "GitHub API returned 404 Not Found. For -VerifyOnly this often means branch protection is not configured yet, or the token cannot read repository administration endpoints."
+    }
     else {
       Write-Error "GitHub API call failed (HTTP $statusCode). $responseMessage"
     }
