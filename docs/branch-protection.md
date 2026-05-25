@@ -9,13 +9,22 @@ This repository uses two layers of protection:
 
 Apply protection from PowerShell:
 
-1. Set a GitHub token with repository administration permissions:
+1. Set a GitHub token:
 
 $env:GITHUB_ADMIN_TOKEN = "<your-admin-token>"
+
+Notes:
+
+- `GITHUB_ADMIN_TOKEN` is required to apply protection.
+- `GITHUB_TOKEN` (read-level) can be used for `-VerifyOnly` checks.
 
 2. Run:
 
 ./scripts/apply-branch-protection.ps1 -Owner bido75 -Repo Auto-Documentation-MCP-Server
+
+3. Verify in read-only mode:
+
+./scripts/apply-branch-protection.ps1 -Owner bido75 -Repo Auto-Documentation-MCP-Server -VerifyOnly
 
 The script configures:
 

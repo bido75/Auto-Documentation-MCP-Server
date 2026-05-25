@@ -56,6 +56,12 @@ export GITHUB_ADMIN_TOKEN=<your-admin-token>
 ./scripts/apply-branch-protection.ps1 -Owner bido75 -Repo Auto-Documentation-MCP-Server
 ```
 
+3. Read-only verification:
+
+```bash
+./scripts/apply-branch-protection.ps1 -Owner bido75 -Repo Auto-Documentation-MCP-Server -VerifyOnly
+```
+
 See full policy details in `docs/branch-protection.md`.
 
 ## CD Releases
