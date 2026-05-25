@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -47,7 +47,7 @@ jobs:
         run: git checkout "${{ steps.resolve_tag.outputs.tag }}"
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -75,10 +75,13 @@ jobs:
             LICENSE
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.resolve_tag.outputs.tag }}
-          generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            dist/auto-docs-notion-mcp-${{ steps.resolve_tag.outputs.tag }}.tar.gz
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.resolve_tag.outputs.tag }}
+        run: |
+          ARTIFACT="dist/auto-docs-notion-mcp-${TAG}.tar.gz"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ARTIFACT" --clobber
+          else
+            gh release create "$TAG" "$ARTIFACT" --generate-notes --title "$TAG"
+          fi
