@@ -22,6 +22,11 @@ if (-not $token) {
   exit 1
 }
 
+if ($token -match "^(YOUR_|<your-|your_|PLACEHOLDER|ghp_example|github_pat_example)") {
+  Write-Error "Detected placeholder token value. Set GITHUB_ADMIN_TOKEN to an actual GitHub token string, not the example text."
+  exit 1
+}
+
 $headers = @{
   Authorization = "Bearer $token"
   Accept = "application/vnd.github+json"
