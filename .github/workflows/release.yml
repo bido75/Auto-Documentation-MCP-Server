@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: write
+  checks: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -45,6 +46,30 @@ jobs:
 
       - name: Checkout release tag
         run: git checkout "${{ steps.resolve_tag.outputs.tag }}"
+
+      - name: Validate tag against protected release policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG_SHA="$(git rev-parse HEAD)"
+          git fetch origin main --depth=1
+
+          # Guardrail: releases can only be created from commits that are already on main.
+          if ! git merge-base --is-ancestor "$TAG_SHA" "origin/main"; then
+            echo "Tag commit is not reachable from origin/main."
+            exit 1
+          fi
+
+          CI_CONCLUSION="$(gh api \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/commits/${TAG_SHA}/check-runs" \
+            --jq '.check_runs[] | select(.name == "test-build") | .conclusion' \
+            | head -n 1)"
+
+          if [ "$CI_CONCLUSION" != "success" ]; then
+            echo "Required CI check 'test-build' is not successful for commit ${TAG_SHA}."
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
