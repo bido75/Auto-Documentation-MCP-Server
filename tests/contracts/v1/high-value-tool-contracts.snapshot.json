@@ -1,0 +1,301 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "contract-snapshot-v1.integration.test.ts",
+  "tools": {
+    "initialize_project_manual": {
+      "type": "object",
+      "required": [
+        "evidenceEventsDatabaseId",
+        "evidenceEventsUrl",
+        "featuresDatabaseId",
+        "featuresUrl",
+        "manualEntriesDatabaseId",
+        "manualEntriesUrl",
+        "projectId",
+        "projectsDatabaseId",
+        "projectsUrl",
+        "releasesDatabaseId",
+        "releasesUrl",
+        "traceId"
+      ],
+      "properties": {
+        "evidenceEventsDatabaseId": {
+          "type": "string"
+        },
+        "evidenceEventsUrl": {
+          "type": "string"
+        },
+        "featuresDatabaseId": {
+          "type": "string"
+        },
+        "featuresUrl": {
+          "type": "string"
+        },
+        "manualEntriesDatabaseId": {
+          "type": "string"
+        },
+        "manualEntriesUrl": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "projectsDatabaseId": {
+          "type": "string"
+        },
+        "projectsUrl": {
+          "type": "string"
+        },
+        "releasesDatabaseId": {
+          "type": "string"
+        },
+        "releasesUrl": {
+          "type": "string"
+        },
+        "traceId": {
+          "type": "string"
+        }
+      }
+    },
+    "analyze_documentation_candidate": {
+      "type": "object",
+      "required": [
+        "audiences",
+        "confidenceReasons",
+        "confidenceScore",
+        "entryTypes",
+        "fallbackEntryId",
+        "fallbackReasonCode",
+        "fallbackStatus",
+        "featureKey",
+        "featureName",
+        "reviewQuestions",
+        "shouldDocument",
+        "traceId"
+      ],
+      "properties": {
+        "audiences": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidenceReasons": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confidenceScore": {
+          "type": "number"
+        },
+        "entryTypes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "fallbackEntryId": {
+          "type": "null"
+        },
+        "fallbackReasonCode": {
+          "type": "string"
+        },
+        "fallbackStatus": {
+          "type": "null"
+        },
+        "featureKey": {
+          "type": "string"
+        },
+        "featureName": {
+          "type": "string"
+        },
+        "reviewQuestions": {
+          "type": "array",
+          "items": {
+            "type": "unknown"
+          }
+        },
+        "shouldDocument": {
+          "type": "boolean"
+        },
+        "traceId": {
+          "type": "string"
+        }
+      }
+    },
+    "upsert_feature_documentation": {
+      "type": "object",
+      "required": [
+        "evidenceEventIds",
+        "featureId",
+        "featureKey",
+        "featureName",
+        "manualEntries",
+        "publishing",
+        "traceId"
+      ],
+      "properties": {
+        "evidenceEventIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "featureId": {
+          "type": "string"
+        },
+        "featureKey": {
+          "type": "string"
+        },
+        "featureName": {
+          "type": "string"
+        },
+        "manualEntries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "pageId",
+              "url"
+            ],
+            "properties": {
+              "pageId": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "publishing": {
+          "type": "object",
+          "required": [
+            "decision",
+            "status"
+          ],
+          "properties": {
+            "decision": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            }
+          }
+        },
+        "traceId": {
+          "type": "string"
+        }
+      }
+    },
+    "publish_or_queue_review": {
+      "type": "object",
+      "required": [
+        "featureId",
+        "finalStatus",
+        "manualEntryIds",
+        "publishingDecision",
+        "reviewNotes",
+        "traceId"
+      ],
+      "properties": {
+        "featureId": {
+          "type": "string"
+        },
+        "finalStatus": {
+          "type": "string"
+        },
+        "manualEntryIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "publishingDecision": {
+          "type": "string"
+        },
+        "reviewNotes": {
+          "type": "string"
+        },
+        "traceId": {
+          "type": "string"
+        }
+      }
+    },
+    "package_manual": {
+      "type": "object",
+      "required": [
+        "excludedEntryCount",
+        "format",
+        "includedEntryCount",
+        "output",
+        "projectId",
+        "releasePageId",
+        "traceId"
+      ],
+      "properties": {
+        "excludedEntryCount": {
+          "type": "number"
+        },
+        "format": {
+          "type": "string"
+        },
+        "includedEntryCount": {
+          "type": "number"
+        },
+        "output": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "releasePageId": {
+          "type": "string"
+        },
+        "traceId": {
+          "type": "string"
+        }
+      }
+    },
+    "publish_or_queue_review_error_envelope": {
+      "type": "object",
+      "required": [
+        "error",
+        "ok"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "causeName",
+            "code",
+            "message",
+            "tool",
+            "traceId"
+          ],
+          "properties": {
+            "causeName": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "tool": {
+              "type": "string"
+            },
+            "traceId": {
+              "type": "string"
+            }
+          }
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

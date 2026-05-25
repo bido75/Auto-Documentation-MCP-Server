@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+build/
+coverage/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Local/state files
+.auto-doc/
+playwright-report/
+test-results/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/*.code-workspace

@@ -1,0 +1,28 @@
+name: Live Notion Integration Tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  live-notion-tests:
+    if: ${{ secrets.NOTION_TOKEN != '' && secrets.NOTION_PARENT_PAGE_ID != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run live Notion pipeline smoke test
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+          RUN_LIVE_NOTION_TESTS: "true"
+        run: npm run test:live-notion
