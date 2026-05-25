@@ -8,6 +8,8 @@ param(
   [string]$Branch = "main"
 )
 
+$ErrorActionPreference = "Stop"
+
 $token = $env:GITHUB_ADMIN_TOKEN
 if (-not $token) {
   Write-Error "Set GITHUB_ADMIN_TOKEN with a token that has repository administration permission."
@@ -43,6 +45,45 @@ $body = @{
 
 $uri = "https://api.github.com/repos/$Owner/$Repo/branches/$Branch/protection"
 
-Invoke-RestMethod -Method Put -Uri $uri -Headers $headers -Body $body -ContentType "application/json" | Out-Null
+try {
+  Invoke-RestMethod -Method Put -Uri $uri -Headers $headers -Body $body -ContentType "application/json" -ErrorAction Stop | Out-Null
+}
+catch {
+  $statusCode = $null
+  $responseMessage = ""
+
+  if ($_.Exception.Response) {
+    try {
+      $statusCode = [int]$_.Exception.Response.StatusCode
+    }
+    catch {
+      $statusCode = $null
+    }
+
+    try {
+      $stream = $_.Exception.Response.GetResponseStream()
+      if ($stream) {
+        $reader = New-Object System.IO.StreamReader($stream)
+        $responseMessage = $reader.ReadToEnd()
+        $reader.Dispose()
+      }
+    }
+    catch {
+      $responseMessage = ""
+    }
+  }
+
+  if ($statusCode -eq 401) {
+    Write-Error "GitHub API returned 401 Unauthorized. Check GITHUB_ADMIN_TOKEN is valid, not expired, and belongs to the correct account."
+  }
+  elseif ($statusCode -eq 403) {
+    Write-Error "GitHub API returned 403 Forbidden. Ensure the token has repository Administration: Read and write for $Owner/$Repo."
+  }
+  else {
+    Write-Error "Failed to apply branch protection (HTTP $statusCode). $responseMessage"
+  }
+
+  exit 1
+}
 
 Write-Output "Branch protection applied for $Owner/$Repo on branch '$Branch'."
