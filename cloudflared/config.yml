@@ -1,0 +1,16 @@
+tunnel: ${CLOUDFLARE_TUNNEL_ID}
+credentials-file: /etc/cloudflared/${CLOUDFLARE_TUNNEL_ID}.json
+
+ingress:
+  - hostname: ${CLOUDFLARE_BIFROST_HOSTNAME}
+    service: http://nginx-proxy
+
+  - hostname: ${CLOUDFLARE_MCP_HOSTNAME}
+    service: http://notion-auto-doc:3000
+    originRequest:
+      noTLSVerify: false
+      connectTimeout: 30s
+      keepAliveTimeout: 90s
+      keepAliveConnections: 100
+
+  - service: http_status:404

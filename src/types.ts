@@ -37,6 +37,26 @@ export interface DocumentationCandidate {
   reviewQuestions: string[];
 }
 
+export interface GeneratedDocumentationNarratives {
+  providerUsed: string;
+  userGuide: {
+    summary: string;
+    steps: string[];
+    expectedOutcome: string;
+    possibleErrors: string[];
+  };
+  adminGuide: {
+    configRequired: string[];
+    endpointsAffected: string[];
+    envVarsRequired: string[];
+    verificationSteps: string[];
+    troubleshooting: string[];
+  };
+  developerNotes?: string;
+}
+
+export type DedupeDecision = "matched_existing_feature" | "new_feature_candidate" | "disambiguated_route_collision";
+
 export type AnalyzeFallbackReasonCode =
   | "none"
   | "no_usable_evidence"
@@ -49,4 +69,7 @@ export interface AnalyzeDocumentationCandidateResult extends DocumentationCandid
   fallbackStatus: AnalyzeFallbackStatus;
   fallbackEntryId: string | null;
   fallbackReasonCode: AnalyzeFallbackReasonCode;
+  dedupeDecision?: DedupeDecision;
+  matchedExistingFeatureKey?: string | null;
+  generatedNarratives: GeneratedDocumentationNarratives | null;
 }

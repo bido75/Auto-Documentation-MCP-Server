@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "auto-doc-mcp": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\vinny\\Documents\\VS-projects\\manual-creator\\src\\index.js"
+      ],
+      "env": {
+        "NOTION_TOKEN": "__NOTION_TOKEN__"
+      }
+    }
+  }
+}

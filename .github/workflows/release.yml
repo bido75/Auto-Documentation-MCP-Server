@@ -50,6 +50,7 @@ jobs:
       - name: Validate tag against protected release policy
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUIRED_CI_CHECK: test-build
         run: |
           TAG_SHA="$(git rev-parse HEAD)"
           git fetch origin main --depth=1
@@ -63,11 +64,11 @@ jobs:
           CI_CONCLUSION="$(gh api \
             -H "Accept: application/vnd.github+json" \
             "/repos/${{ github.repository }}/commits/${TAG_SHA}/check-runs" \
-            --jq '.check_runs[] | select(.name == "test-build") | .conclusion' \
+            --jq ".check_runs[] | select(.name == \"${REQUIRED_CI_CHECK}\") | .conclusion" \
             | head -n 1)"
 
           if [ "$CI_CONCLUSION" != "success" ]; then
-            echo "Required CI check 'test-build' is not successful for commit ${TAG_SHA}."
+            echo "Required CI check '${REQUIRED_CI_CHECK}' is not successful for commit ${TAG_SHA}."
             exit 1
           fi
 

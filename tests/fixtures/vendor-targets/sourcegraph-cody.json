@@ -1,0 +1,9 @@
+{
+  "tool": "Sourcegraph Cody",
+  "status": "unsupported_raw_config_target",
+  "sourceUrls": [
+    "https://sourcegraph.com/docs/cody/clients",
+    "https://sourcegraph.com/docs/cody/clients/install-vscode"
+  ],
+  "notes": "Sourcegraph documents Cody as a VS Code extension/client install flow, not as a standalone raw MCP config file at ~/.config/cody/mcp.json."
+}

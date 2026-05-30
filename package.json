@@ -4,25 +4,47 @@
   "type": "module",
   "private": true,
   "bin": {
-    "auto-docs-notion-mcp": "./build/index.js"
+    "auto-docs-notion-mcp": "./build/index.js",
+    "auto-doc-mcp": "./bin/auto-doc-mcp.js",
+    "auto-doc-mcp-setup": "./bin/auto-doc-mcp.js"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
+    "dev:runner": "tsx src/index.ts runner",
     "build": "tsc",
+    "build:extension": "npm run build --prefix packages/vscode-extension",
+    "copy:extension-server": "node scripts/copy-mcp-server-to-extension.mjs",
+    "package:extension": "node scripts/preflight-packaging.mjs vscode && npm run build && npm run copy:extension-server && npm run package --prefix packages/vscode-extension",
+    "package:vscode": "npm run package:extension",
+    "package:jetbrains": "node scripts/preflight-packaging.mjs jetbrains && node scripts/package-jetbrains.mjs",
+    "smoke:extension-install": "powershell -NoProfile -Command \"$vsix=(Get-ChildItem 'packages/vscode-extension/*.vsix' | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName; if (-not $vsix) { throw 'No VSIX found. Run npm run package:extension first.' }; if (-not (Get-Command code -ErrorAction SilentlyContinue)) { throw 'VS Code CLI not found in PATH.' }; code --install-extension $vsix --force\"",
+    "setup": "tsx bin/setup.ts",
+    "bridge": "tsx bin/bridge.ts",
+    "selfhost:configure:bifrost": "node scripts/configure-bifrost.mjs",
     "test": "vitest run",
+    "test:extension": "vitest run tests/integration/extension-config-writer.integration.test.ts tests/integration/extension-jsonrpc-client.integration.test.ts tests/integration/extension-status-panel.integration.test.ts",
     "test:live-notion": "vitest run tests/integration/live-notion.integration.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "start": "node build/index.js"
+    "start": "node build/index.js",
+    "start:runner": "node build/index.js runner"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.54.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@notionhq/client": "^2.2.15",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "openai": "^4.104.0",
     "playwright": "^1.54.2",
     "simple-git": "^3.27.0",
+    "yaml": "^2.9.0",
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
     "@types/node": "^22.10.0",
     "nock": "^13.5.6",
     "tsx": "^4.19.2",

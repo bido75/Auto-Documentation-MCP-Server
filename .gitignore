@@ -4,6 +4,7 @@ node_modules/
 # Build output
 build/
 coverage/
+packages/jetbrains-plugin/.gradle-bootstrap/
 
 # Environment
 .env
@@ -14,6 +15,9 @@ coverage/
 .auto-doc/
 playwright-report/
 test-results/
+bifrost-data/
+Microsoft/
+.vitest*.json
 
 # Logs
 npm-debug.log*

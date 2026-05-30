@@ -1,0 +1,8 @@
+{
+  "tool": "Sublime Text",
+  "status": "unsupported_raw_config_target",
+  "sourceUrls": [
+    "https://www.sublimetext.com/docs/"
+  ],
+  "notes": "Official Sublime Text docs cover settings, packages, and API development, but no MCP client config surface matching auto-doc-mcp.json was found."
+}

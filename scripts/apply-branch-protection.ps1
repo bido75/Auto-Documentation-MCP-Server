@@ -12,6 +12,9 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Must match the CI job context in .github/workflows/ci.yml
+$RequiredStatusCheckContext = "test-build"
+
 $token = $env:GITHUB_ADMIN_TOKEN
 if (-not $token) {
   $token = $env:GITHUB_TOKEN
@@ -130,8 +133,8 @@ function Assert-ExpectedPolicy {
     exit 1
   }
 
-  if (-not ($Summary.requiredStatusCheckContexts -contains "test-build")) {
-    Write-Error "Verification failed: required status check context 'test-build' is missing."
+  if (-not ($Summary.requiredStatusCheckContexts -contains $RequiredStatusCheckContext)) {
+    Write-Error "Verification failed: required status check context '$RequiredStatusCheckContext' is missing."
     exit 1
   }
 
@@ -159,7 +162,7 @@ if ($VerifyOnly) {
 $body = @{
   required_status_checks = @{
     strict = $true
-    contexts = @("test-build")
+    contexts = @($RequiredStatusCheckContext)
   }
   enforce_admins = $true
   required_pull_request_reviews = @{

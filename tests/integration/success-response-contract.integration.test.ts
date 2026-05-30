@@ -7,12 +7,22 @@ import { StateStore } from "../../src/lib/state-store.js";
 import { registerAnalyzeDocumentationCandidateTool } from "../../src/tools/analyze-documentation-candidate.js";
 import { registerCaptureDevelopmentEventTool } from "../../src/tools/capture-development-event.js";
 import { registerCaptureFeatureScreenshotTool } from "../../src/tools/capture-feature-screenshot.js";
+import { registerExportHelpCenterContentTool } from "../../src/tools/export-help-center-content.js";
 import { registerExportManualMarkdownTool } from "../../src/tools/export-manual-markdown.js";
+import { registerExportManualPdfTool } from "../../src/tools/export-manual-pdf.js";
+import { registerGenerateReleaseChangelogTool } from "../../src/tools/generate-release-changelog.js";
 import { registerGetDocumentationStatusTool } from "../../src/tools/get-documentation-status.js";
 import { registerGetGitDiffSummaryTool } from "../../src/tools/get-git-diff-summary.js";
+import { registerGetRunnerFailureTriageMetadataTool } from "../../src/tools/get-runner-failure-triage-metadata.js";
+import { registerGetRunnerHealthSummaryTool } from "../../src/tools/get-runner-health-summary.js";
+import { registerGetRunnerReleaseAutomationStatusTool } from "../../src/tools/get-runner-release-automation-status.js";
 import { registerInitializeProjectManualTool } from "../../src/tools/initialize-project-manual.js";
 import { registerPackageManualTool } from "../../src/tools/package-manual.js";
+import { registerPublishPrCommentTool } from "../../src/tools/publish-pr-comment.js";
 import { registerPublishOrQueueReviewTool } from "../../src/tools/publish-or-queue-review.js";
+import { registerRunReleaseDocumentationPipelineTool } from "../../src/tools/run-release-documentation-pipeline.js";
+import { registerSetRunnerFailureTriageMetadataTool } from "../../src/tools/set-runner-failure-triage-metadata.js";
+import { registerSyncManualToLocalDocsTool } from "../../src/tools/sync-manual-to-local-docs.js";
 import { registerUpsertFeatureDocumentationTool } from "../../src/tools/upsert-feature-documentation.js";
 
 const testContext = vi.hoisted(() => {
@@ -42,6 +52,10 @@ vi.mock("../../src/lib/state-store.js", async () => {
 
 vi.mock("../../src/lib/screenshots.js", () => ({
   captureScreenshot: async (_url: string, outputPath: string) => outputPath,
+}));
+
+vi.mock("../../src/lib/pdf.js", () => ({
+  generatePdfFromMarkdown: async (input: { outputPath: string }) => input.outputPath,
 }));
 
 type FakePage = {
@@ -521,7 +535,7 @@ describe("tool success response contract", () => {
         process.env.NOTION_TOKEN = previousNotionToken;
       }
     }
-  });
+  }, 30_000);
 
   it("returns stable success payloads for utility tools", async () => {
     const server = new FakeServer();
@@ -568,5 +582,494 @@ describe("tool success response contract", () => {
     expect(typeof shot.traceId).toBe("string");
     expect(shot.ok).toBe(true);
     expect(shot.savedPath).toBe("./tmp/success.png");
-  });
+  }, 15_000);
+
+  it("returns stable success payloads for post-MVP tools", async () => {
+    const previousNotionToken = process.env.NOTION_TOKEN;
+    process.env.NOTION_TOKEN = "test_token";
+
+    try {
+      const stateDir = await mkdtemp(join(tmpdir(), "auto-doc-post-mvp-contract-"));
+      testContext.store = new StateStore(join(stateDir, "state.json"));
+      testContext.notion = createFakeNotion("parent_page");
+
+      const server = new FakeServer();
+      registerInitializeProjectManualTool(server as never);
+      registerCaptureDevelopmentEventTool(server as never);
+      registerAnalyzeDocumentationCandidateTool(server as never);
+      registerUpsertFeatureDocumentationTool(server as never);
+      registerGenerateReleaseChangelogTool(server as never);
+      registerPublishPrCommentTool(server as never);
+      registerExportManualPdfTool(server as never);
+      registerSyncManualToLocalDocsTool(server as never);
+      registerExportHelpCenterContentTool(server as never);
+      registerGetRunnerFailureTriageMetadataTool(server as never);
+      registerGetRunnerHealthSummaryTool(server as never);
+      registerGetRunnerReleaseAutomationStatusTool(server as never);
+      registerSetRunnerFailureTriageMetadataTool(server as never);
+
+      const initialize = server.handlers.get("initialize_project_manual");
+      const capture = server.handlers.get("capture_development_event");
+      const analyze = server.handlers.get("analyze_documentation_candidate");
+      const upsert = server.handlers.get("upsert_feature_documentation");
+      const generateChangelog = server.handlers.get("generate_release_changelog");
+      const publishPrComment = server.handlers.get("publish_pr_comment");
+      const exportPdf = server.handlers.get("export_manual_pdf");
+      const syncLocalDocs = server.handlers.get("sync_manual_to_local_docs");
+      const exportHelpCenter = server.handlers.get("export_help_center_content");
+      const getRunnerFailureTriageMetadata = server.handlers.get("get_runner_failure_triage_metadata");
+      const getRunnerHealthSummary = server.handlers.get("get_runner_health_summary");
+      const getRunnerStatus = server.handlers.get("get_runner_release_automation_status");
+      const setRunnerFailureTriageMetadata = server.handlers.get("set_runner_failure_triage_metadata");
+
+      expect(initialize).toBeDefined();
+      expect(capture).toBeDefined();
+      expect(analyze).toBeDefined();
+      expect(upsert).toBeDefined();
+      expect(generateChangelog).toBeDefined();
+      expect(publishPrComment).toBeDefined();
+      expect(exportPdf).toBeDefined();
+      expect(syncLocalDocs).toBeDefined();
+      expect(exportHelpCenter).toBeDefined();
+      expect(getRunnerFailureTriageMetadata).toBeDefined();
+      expect(getRunnerHealthSummary).toBeDefined();
+      expect(getRunnerStatus).toBeDefined();
+      expect(setRunnerFailureTriageMetadata).toBeDefined();
+
+      const initialized = parseToolResult<{
+        projectId: string;
+      }>(
+        await initialize!({
+          projectName: "Acme Post-MVP Contract",
+          parentPageId: "parent_page",
+          publishingMode: "balanced",
+          autoPublishThreshold: 90,
+        }),
+      );
+
+      const captured = parseToolResult<{
+        evidenceEventId: string;
+      }>(
+        await capture!({
+          projectId: initialized.projectId,
+          source: "github",
+          eventType: "pr_merged",
+          summary: "Merged billing export workflow",
+          prUrl: "https://github.com/acme/app/pull/42",
+          filesChanged: "src/routes/billing/settings.tsx",
+          testStatus: "passed",
+        }),
+      );
+
+      const analyzed = parseToolResult<{
+        featureKey: string;
+        featureName: string;
+        confidenceReasons: string[];
+      }>(
+        await analyze!({
+          projectId: initialized.projectId,
+          evidenceEventIds: [captured.evidenceEventId],
+        }),
+      );
+
+      await upsert!({
+        projectId: initialized.projectId,
+        featureKey: analyzed.featureKey,
+        featureName: analyzed.featureName,
+        audiences: ["User", "Admin"],
+        manualEntries: [
+          {
+            entryType: "User Guide",
+            title: "Export invoices from Billing",
+            userGuide: "Open Billing and click Export.",
+            adminGuide: "Ensure billing export permissions are enabled.",
+          },
+        ],
+        evidenceEventIds: [captured.evidenceEventId],
+        confidenceScore: 95,
+        confidenceReasons: analyzed.confidenceReasons,
+        publishingMode: "balanced",
+        autoPublishThreshold: 90,
+        sourcePr: "https://github.com/acme/app/pull/42",
+      });
+
+      const changelog = parseToolResult<{
+        traceId: string;
+        projectId: string;
+        releaseVersion: string;
+        releaseLinked: boolean;
+        entryCount: number;
+        sectionCounts: Record<string, number>;
+        changelogMarkdown: string;
+      }>(
+        await generateChangelog!({
+          projectId: initialized.projectId,
+          releaseVersion: "2.0.0",
+        }),
+      );
+
+      expect(typeof changelog.traceId).toBe("string");
+      expect(changelog.projectId).toBe(initialized.projectId);
+      expect(changelog.releaseVersion).toBe("2.0.0");
+      expect(typeof changelog.releaseLinked).toBe("boolean");
+      expect(typeof changelog.entryCount).toBe("number");
+      expect(typeof changelog.sectionCounts).toBe("object");
+      expect(typeof changelog.changelogMarkdown).toBe("string");
+
+      const prComment = parseToolResult<{
+        traceId: string;
+        projectId: string;
+        prUrl: string;
+        dryRun: boolean;
+        action: string;
+        entryCount: number;
+        commentBody: string;
+      }>(
+        await publishPrComment!({
+          projectId: initialized.projectId,
+          prUrl: "https://github.com/acme/app/pull/42",
+          dryRun: true,
+        }),
+      );
+
+      expect(typeof prComment.traceId).toBe("string");
+      expect(prComment.projectId).toBe(initialized.projectId);
+      expect(prComment.prUrl).toBe("https://github.com/acme/app/pull/42");
+      expect(prComment.dryRun).toBe(true);
+      expect(prComment.action).toBe("none");
+      expect(typeof prComment.entryCount).toBe("number");
+      expect(prComment.commentBody).toContain("auto-doc-pr-comment");
+
+      const pdfResult = parseToolResult<{
+        traceId: string;
+        projectId: string;
+        releaseVersion: string;
+        audience: string;
+        includedEntryCount: number;
+        excludedEntryCount: number;
+        outputPath: string;
+      }>(
+        await exportPdf!({
+          projectId: initialized.projectId,
+          releaseVersion: "2.0.0",
+          audience: "both",
+          outputPath: join(stateDir, "artifacts", "manual-2.0.0.pdf"),
+        }),
+      );
+
+      expect(typeof pdfResult.traceId).toBe("string");
+      expect(pdfResult.projectId).toBe(initialized.projectId);
+      expect(pdfResult.releaseVersion).toBe("2.0.0");
+      expect(pdfResult.audience).toBe("both");
+      expect(typeof pdfResult.includedEntryCount).toBe("number");
+      expect(typeof pdfResult.excludedEntryCount).toBe("number");
+      expect(pdfResult.outputPath).toContain("manual-2.0.0.pdf");
+
+      const syncResult = parseToolResult<{
+        traceId: string;
+        projectId: string;
+        releaseVersion: string | null;
+        audience: string;
+        outputPath: string;
+        entryCount: number;
+        byteLength: number;
+      }>(
+        await syncLocalDocs!({
+          projectId: initialized.projectId,
+          audience: "both",
+          outputPath: join(stateDir, "docs", "MANUAL.md"),
+        }),
+      );
+
+      expect(typeof syncResult.traceId).toBe("string");
+      expect(syncResult.projectId).toBe(initialized.projectId);
+      expect(syncResult.releaseVersion).toBeNull();
+      expect(syncResult.audience).toBe("both");
+      expect(syncResult.outputPath).toContain("MANUAL.md");
+      expect(typeof syncResult.entryCount).toBe("number");
+      expect(typeof syncResult.byteLength).toBe("number");
+
+      const helpCenter = parseToolResult<{
+        traceId: string;
+        version: string;
+        projectId: string;
+        releaseVersion: string | null;
+        audience: string;
+        sectionCount: number;
+        articleCount: number;
+        sections: Array<unknown>;
+        outputPath: string | null;
+      }>(
+        await exportHelpCenter!({
+          projectId: initialized.projectId,
+          audience: "both",
+          outputPath: join(stateDir, "docs", "help-center.json"),
+        }),
+      );
+
+      expect(typeof helpCenter.traceId).toBe("string");
+      expect(helpCenter.version).toBe("1");
+      expect(helpCenter.projectId).toBe(initialized.projectId);
+      expect(helpCenter.releaseVersion).toBeNull();
+      expect(helpCenter.audience).toBe("both");
+      expect(typeof helpCenter.sectionCount).toBe("number");
+      expect(typeof helpCenter.articleCount).toBe("number");
+      expect(Array.isArray(helpCenter.sections)).toBe(true);
+      expect(helpCenter.outputPath).toContain("help-center.json");
+
+      const runnerRepoPath = join(stateDir, "runner-repo");
+      await testContext.store.setLastSeenReleaseTag(initialized.projectId, runnerRepoPath, "v2.0.0");
+      await testContext.store.setReleaseAutomationRun({
+        projectId: initialized.projectId,
+        repoPath: runnerRepoPath,
+        releaseTag: "v2.0.0",
+        releaseVersion: "2.0.0",
+        status: "success",
+        attemptedAt: new Date().toISOString(),
+      });
+
+      const runnerStatus = parseToolResult<{
+        traceId: string;
+        projectId: string;
+        repoPath: string;
+        releaseTag: string | null;
+        lastSeenReleaseTag: string | null;
+        recentRunCount: number;
+        queriedRun: Record<string, unknown> | null;
+        lastSuccessfulRun: Record<string, unknown> | null;
+        lastFailedRun: Record<string, unknown> | null;
+        recentRuns: Array<Record<string, unknown>>;
+      }>(
+        await getRunnerStatus!({
+          projectId: initialized.projectId,
+          repoPath: runnerRepoPath,
+          releaseTag: "v2.0.0",
+          limit: 5,
+        }),
+      );
+
+      expect(typeof runnerStatus.traceId).toBe("string");
+      expect(runnerStatus.projectId).toBe(initialized.projectId);
+      expect(runnerStatus.repoPath).toBe(runnerRepoPath);
+      expect(runnerStatus.releaseTag).toBe("v2.0.0");
+      expect(runnerStatus.lastSeenReleaseTag).toBe("v2.0.0");
+      expect(typeof runnerStatus.recentRunCount).toBe("number");
+      expect(typeof runnerStatus.queriedRun).toBe("object");
+      expect(typeof runnerStatus.lastSuccessfulRun).toBe("object");
+      expect(Array.isArray(runnerStatus.recentRuns)).toBe(true);
+
+      const runnerTriageMetadata = parseToolResult<{
+        traceId: string;
+        projectId: string;
+        repoPath: string;
+        action: string;
+        triageMetadata: {
+          acknowledgedAt: string;
+          acknowledgedBy: string;
+          note: string;
+          cooldownUntil: string;
+        };
+      }>(
+        await setRunnerFailureTriageMetadata!({
+          projectId: initialized.projectId,
+          repoPath: runnerRepoPath,
+          action: "set",
+          acknowledge: true,
+          acknowledgedAt: "2026-05-26T07:00:00.000Z",
+          acknowledgedBy: "ops@example.com",
+          note: "Known issue",
+          cooldownUntil: "2026-05-26T08:00:00.000Z",
+        }),
+      );
+
+      expect(typeof runnerTriageMetadata.traceId).toBe("string");
+      expect(runnerTriageMetadata.projectId).toBe(initialized.projectId);
+      expect(runnerTriageMetadata.repoPath).toBe(runnerRepoPath);
+      expect(runnerTriageMetadata.action).toBe("set");
+      expect(typeof runnerTriageMetadata.triageMetadata.acknowledgedAt).toBe("string");
+      expect(typeof runnerTriageMetadata.triageMetadata.cooldownUntil).toBe("string");
+
+      const runnerTriageMetadataStatus = parseToolResult<{
+        traceId: string;
+        projectId: string;
+        repoPath: string;
+        historyView: string;
+        sortOrder: string;
+        responseMode: string;
+        timelineLabels: string[];
+        triageMetadata: Record<string, unknown> | null;
+        historyCount: number;
+        totalHistoryCount: number;
+        lastAcknowledgement: Record<string, unknown> | null;
+        lastCooldownChange: Record<string, unknown> | null;
+        recentHistory: Array<Record<string, unknown>>;
+      }>(
+        await getRunnerFailureTriageMetadata!({
+          projectId: initialized.projectId,
+          repoPath: runnerRepoPath,
+          limit: 5,
+        }),
+      );
+
+      expect(typeof runnerTriageMetadataStatus.traceId).toBe("string");
+      expect(runnerTriageMetadataStatus.projectId).toBe(initialized.projectId);
+      expect(runnerTriageMetadataStatus.repoPath).toBe(runnerRepoPath);
+      expect(typeof runnerTriageMetadataStatus.historyView).toBe("string");
+      expect(typeof runnerTriageMetadataStatus.sortOrder).toBe("string");
+      expect(typeof runnerTriageMetadataStatus.responseMode).toBe("string");
+      expect(Array.isArray(runnerTriageMetadataStatus.timelineLabels)).toBe(true);
+      expect(typeof runnerTriageMetadataStatus.historyCount).toBe("number");
+      expect(typeof runnerTriageMetadataStatus.totalHistoryCount).toBe("number");
+      expect(Array.isArray(runnerTriageMetadataStatus.recentHistory)).toBe(true);
+      expect(typeof runnerTriageMetadataStatus.lastAcknowledgement).toBe("object");
+      expect(typeof runnerTriageMetadataStatus.lastCooldownChange).toBe("object");
+
+      const runnerTriageTimeline = parseToolResult<{
+        responseMode: string;
+        timelineLabels: string[];
+        timeline: {
+          eventCount: number;
+          labels: {
+            acknowledged: number;
+            cooldown_set: number;
+            cleared: number;
+          };
+          events: Array<Record<string, unknown>>;
+        };
+      }>(
+        await getRunnerFailureTriageMetadata!({
+          projectId: initialized.projectId,
+          repoPath: runnerRepoPath,
+          responseMode: "timeline",
+          timelineLabels: ["acknowledged"],
+          limit: 5,
+        }),
+      );
+
+      expect(runnerTriageTimeline.responseMode).toBe("timeline");
+      expect(runnerTriageTimeline.timelineLabels).toEqual(["acknowledged"]);
+      expect(typeof runnerTriageTimeline.timeline.eventCount).toBe("number");
+      expect(typeof runnerTriageTimeline.timeline.labels).toBe("object");
+      expect(Array.isArray(runnerTriageTimeline.timeline.events)).toBe(true);
+
+      const runnerHealthSummary = parseToolResult<{
+        traceId: string;
+        source: string;
+        targetCount: number;
+        counts: {
+          healthy: number;
+          failing: number;
+          pending: number;
+          disabled: number;
+          noData: number;
+        };
+        triage: {
+          criticalCount: number;
+          highCount: number;
+          mediumCount: number;
+          lowCount: number;
+          staleFailureCount: number;
+          escalationCount: number;
+          acknowledgedCount: number;
+          cooldownActiveCount: number;
+          newestFailureAt: string | null;
+          oldestFailureAt: string | null;
+          highestPriorityCount: number;
+          highestPriorityLimit: number;
+          staleFailureMinutesThreshold: number;
+          escalationFailureStreakThreshold: number;
+        };
+        failingTargets: Array<Record<string, unknown>>;
+        highestPriorityTargets: Array<Record<string, unknown>>;
+        targets: Array<Record<string, unknown>>;
+      }>(
+        await getRunnerHealthSummary!({
+          targets: [
+            {
+              projectId: initialized.projectId,
+              repoPath: runnerRepoPath,
+              releaseAutomation: true,
+            },
+          ],
+          limitPerTarget: 1,
+        }),
+      );
+
+      expect(typeof runnerHealthSummary.traceId).toBe("string");
+      expect(runnerHealthSummary.source).toBe("input");
+      expect(typeof runnerHealthSummary.targetCount).toBe("number");
+      expect(typeof runnerHealthSummary.counts).toBe("object");
+      expect(typeof runnerHealthSummary.triage).toBe("object");
+      expect(typeof runnerHealthSummary.triage.staleFailureCount).toBe("number");
+      expect(typeof runnerHealthSummary.triage.escalationCount).toBe("number");
+      expect(typeof runnerHealthSummary.triage.acknowledgedCount).toBe("number");
+      expect(typeof runnerHealthSummary.triage.cooldownActiveCount).toBe("number");
+      expect(Array.isArray(runnerHealthSummary.failingTargets)).toBe(true);
+      expect(Array.isArray(runnerHealthSummary.highestPriorityTargets)).toBe(true);
+      expect(Array.isArray(runnerHealthSummary.targets)).toBe(true);
+      if (runnerHealthSummary.targets[0]) {
+        expect(typeof runnerHealthSummary.targets[0].failureStreak).toBe("number");
+        expect(typeof runnerHealthSummary.targets[0].lastSuccessAt).toBe("string");
+      }
+      if (runnerHealthSummary.failingTargets[0]) {
+        expect(typeof runnerHealthSummary.failingTargets[0].stale).toBe("boolean");
+        expect(typeof runnerHealthSummary.failingTargets[0].escalated).toBe("boolean");
+        expect(typeof runnerHealthSummary.failingTargets[0].acknowledged).toBe("boolean");
+        expect(typeof runnerHealthSummary.failingTargets[0].cooldownActive).toBe("boolean");
+        expect(typeof runnerHealthSummary.failingTargets[0].priorityScore).toBe("number");
+      }
+
+      const pipelineServer = new FakeServer();
+      registerRunReleaseDocumentationPipelineTool(pipelineServer as never);
+      const runPipeline = pipelineServer.handlers.get("run_release_documentation_pipeline");
+      expect(runPipeline).toBeDefined();
+
+      const repoDir = await mkdtemp(join(tmpdir(), "auto-doc-post-mvp-pipeline-"));
+      const git = simpleGit(repoDir);
+      await git.init();
+      await writeFile(join(repoDir, "README.md"), "pipeline test\n", "utf-8");
+
+      const pipelineResult = parseToolResult<{
+        traceId: string;
+        projectId: string;
+        releaseVersion: string;
+        trigger: Record<string, unknown>;
+        changelog: Record<string, unknown>;
+        package: Record<string, unknown>;
+        pdf: Record<string, unknown>;
+        sync: Record<string, unknown>;
+        helpCenter: Record<string, unknown> | null;
+        prComment: null;
+      }>(
+        await runPipeline!({
+          projectId: initialized.projectId,
+          releaseVersion: "2.0.0",
+          repoPath: repoDir,
+          mode: "working_tree",
+          audience: "both",
+          packageFormat: "markdown",
+          pdfOutputPath: join(stateDir, "artifacts", "pipeline-manual.pdf"),
+          localDocsOutputPath: join(stateDir, "docs", "pipeline-MANUAL.md"),
+          helpCenterOutputPath: join(stateDir, "docs", "pipeline-help-center.json"),
+        }),
+      );
+
+      expect(typeof pipelineResult.traceId).toBe("string");
+      expect(pipelineResult.projectId).toBe(initialized.projectId);
+      expect(pipelineResult.releaseVersion).toBe("2.0.0");
+      expect(typeof pipelineResult.trigger).toBe("object");
+      expect(typeof pipelineResult.changelog).toBe("object");
+      expect(typeof pipelineResult.package).toBe("object");
+      expect(typeof pipelineResult.pdf).toBe("object");
+      expect(typeof pipelineResult.sync).toBe("object");
+      expect(typeof pipelineResult.helpCenter).toBe("object");
+      expect(pipelineResult.prComment).toBeNull();
+    } finally {
+      if (previousNotionToken === undefined) {
+        delete process.env.NOTION_TOKEN;
+      } else {
+        process.env.NOTION_TOKEN = previousNotionToken;
+      }
+    }
+  }, 30_000);
 });

@@ -100,6 +100,24 @@ describe("get_documentation_status", () => {
                   Status: { status: { name: "Needs Review" } },
                   "Confidence Score": { number: 52 },
                   "Entry Title": { title: [{ text: { content: "Webhook Setup" } }] },
+                  "Reviewer Notes": {
+                    rich_text: [
+                      {
+                        text: {
+                          content:
+                            "Forced queue review: low-confidence dedupe match (matched_existing_feature against route:webhooks-settings).",
+                        },
+                      },
+                    ],
+                  },
+                },
+              },
+              {
+                id: "entry_3",
+                properties: {
+                  Status: { status: { name: "Needs Review" } },
+                  "Confidence Score": { number: 77 },
+                  "Entry Title": { title: [{ text: { content: "Admin Notifications" } }] },
                   "Reviewer Notes": { rich_text: [] },
                 },
               },
@@ -132,6 +150,7 @@ describe("get_documentation_status", () => {
       capturedCount: number;
       lowConfidenceCount: number;
       missingReviewQuestions: string[];
+      forcedQueueReasons?: string[];
       health: string;
     }>(
       await getStatus!({
@@ -141,10 +160,15 @@ describe("get_documentation_status", () => {
     );
 
     expect(result.publishedCount).toBe(1);
-    expect(result.needsReviewCount).toBe(1);
+    expect(result.needsReviewCount).toBe(2);
     expect(result.capturedCount).toBe(0);
     expect(result.lowConfidenceCount).toBe(1);
-    expect(result.missingReviewQuestions).toContain("Missing reviewer notes for 'Webhook Setup'.");
+    expect(result.missingReviewQuestions).toContain("Missing reviewer notes for 'Admin Notifications'.");
+    expect(result.forcedQueueReasons).toEqual(
+      expect.arrayContaining([
+        "Webhook Setup: Forced queue review: low-confidence dedupe match (matched_existing_feature against route:webhooks-settings).",
+      ]),
+    );
     expect(result.health).toBe("Needs Review");
   });
 });

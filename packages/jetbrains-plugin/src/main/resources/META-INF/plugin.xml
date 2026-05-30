@@ -1,0 +1,29 @@
+<idea-plugin>
+  <id>com.autodocmcp.plugin</id>
+  <name>Auto-Doc MCP</name>
+  <version>0.1.0</version>
+  <vendor url="https://github.com/bido75/Auto-Documentation-MCP-Server">Auto-Doc</vendor>
+
+  <description>
+    Auto-Documentation MCP integration for JetBrains IDEs.
+  </description>
+
+  <depends>com.intellij.modules.platform</depends>
+  <depends>Git4Idea</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+    <notificationGroup id="Auto-Doc MCP" displayType="BALLOON" isLogByDefault="true"/>
+    <projectService serviceImplementation="com.autodocmcp.McpServerService"/>
+    <postStartupActivity implementation="com.autodocmcp.AutoDocMcpPlugin"/>
+    <toolWindow id="Auto-Doc MCP" factoryClass="com.autodocmcp.AutoDocStatusToolWindowFactory" anchor="right"/>
+  </extensions>
+
+  <actions>
+    <action id="com.autodocmcp.SetupAction" class="com.autodocmcp.SetupAction" text="Auto-Doc MCP: Setup">
+      <add-to-group group-id="ToolsMenu" anchor="last"/>
+    </action>
+    <action id="com.autodocmcp.ToggleServerAction" class="com.autodocmcp.ToggleServerAction" text="Auto-Doc MCP: Start or Stop">
+      <add-to-group group-id="ToolsMenu" anchor="last"/>
+    </action>
+  </actions>
+</idea-plugin>

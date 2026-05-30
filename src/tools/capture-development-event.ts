@@ -19,6 +19,77 @@ const eventTypeSchema = z.enum([
   "session_completed",
 ]);
 
+function buildEvidenceSummary(input: {
+  summary: string;
+  eventType: z.infer<typeof eventTypeSchema>;
+  source: z.infer<typeof sourceSchema>;
+  prTitle?: string;
+  prBody?: string;
+  issueReferences?: string[];
+  prNumber?: number;
+  baseBranch?: string;
+  headBranch?: string;
+  branch?: string;
+  releaseVersion?: string;
+}) {
+  const parts = [input.summary.trim()];
+
+  if (input.prTitle) {
+    parts.push(`PR title: ${input.prTitle.trim()}`);
+  }
+
+  if (input.prBody) {
+    const bodyPreview = input.prBody
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 4)
+      .join(" ");
+
+    if (bodyPreview) {
+      parts.push(`PR body: ${bodyPreview}`);
+    }
+  }
+
+  if (input.issueReferences && input.issueReferences.length > 0) {
+    parts.push(`Issue references: ${input.issueReferences.join(", ")}`);
+  }
+
+  if (input.prNumber !== undefined) {
+    const branchDetails = [input.headBranch ?? input.branch, input.baseBranch].filter(Boolean).join(" -> ");
+    parts.push(
+      input.eventType === "pr_merged"
+        ? `Merged pull request #${input.prNumber}${branchDetails ? ` (${branchDetails})` : ""}`
+        : `Pull request #${input.prNumber}${branchDetails ? ` (${branchDetails})` : ""}`,
+    );
+  }
+
+  if (input.releaseVersion) {
+    parts.push(`Release version: ${input.releaseVersion}`);
+  }
+
+  if (input.source === "github" && input.branch && !input.headBranch) {
+    parts.push(`GitHub branch: ${input.branch}`);
+  }
+
+  return parts.filter(Boolean).join("\n");
+}
+
+function extractIssueReferences(prBody?: string): string[] {
+  if (!prBody) {
+    return [];
+  }
+
+  const matches = prBody.match(/(?:#|issue\s+#?)(\d{1,6})/gi) ?? [];
+  const refs = matches
+    .map((value) => value.replace(/^[^\d]+/, "#"))
+    .map((value) => value.replace(/issue\s+/i, "#"))
+    .filter((value) => value !== "#");
+
+  return Array.from(new Set(refs)).slice(0, 10);
+}
+
 export function registerCaptureDevelopmentEventTool(server: McpServer) {
   server.tool(
     "capture_development_event",
@@ -31,6 +102,12 @@ export function registerCaptureDevelopmentEventTool(server: McpServer) {
       commitSha: z.string().optional(),
       branch: z.string().optional(),
       prUrl: z.string().url().optional(),
+      prTitle: z.string().optional(),
+      prBody: z.string().optional(),
+      prNumber: z.number().int().positive().optional(),
+      baseBranch: z.string().optional(),
+      headBranch: z.string().optional(),
+      issueReferences: z.array(z.string()).optional(),
       releaseVersion: z.string().optional(),
       filesChanged: z.string().optional(),
       diffSummary: z.string().optional(),
@@ -59,8 +136,11 @@ export function registerCaptureDevelopmentEventTool(server: McpServer) {
 
         await runProjectPreflight({ notion, project });
 
-        const redactedSummary = redactSecrets(input.summary);
+        const issueReferences = input.issueReferences ?? extractIssueReferences(input.prBody);
+        const enrichedSummary = buildEvidenceSummary({ ...input, issueReferences });
+        const redactedSummary = redactSecrets(enrichedSummary);
         const redactedDiffSummary = input.diffSummary ? redactSecrets(input.diffSummary) : undefined;
+        const redactedPrBody = input.prBody ? redactSecrets(input.prBody.slice(0, 1500)) : undefined;
         const normalizedFilesChanged = input.filesChanged
           ? input.filesChanged
               .split(",")
@@ -141,8 +221,16 @@ export function registerCaptureDevelopmentEventTool(server: McpServer) {
         summary: redactedSummary,
         filesChanged: redactedFilesChanged,
         diffSummary: redactedDiffSummary,
+        prBody: redactedPrBody,
+        issueReferences,
         commitSha: input.commitSha,
-        branch: input.branch,
+        branch: input.headBranch ?? input.branch,
+        prUrl: input.prUrl,
+        prTitle: input.prTitle,
+        prNumber: input.prNumber,
+        baseBranch: input.baseBranch,
+        headBranch: input.headBranch,
+        releaseVersion: input.releaseVersion,
         eventType: input.eventType,
         source: input.source,
         testStatus: input.testStatus,

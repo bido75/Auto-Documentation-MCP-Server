@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { renderManualMarkdown } from "../lib/export.js";
+import { blocksToMarkdown, fetchAllBlocks } from "../lib/notion-block-exporter.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { createNotionClient } from "../lib/notion-client.js";
@@ -60,30 +61,8 @@ async function queryAll(notion: ReturnType<typeof createNotionClient>, input: Re
 }
 
 async function loadEntryBody(notion: ReturnType<typeof createNotionClient>, pageId: string): Promise<string> {
-  const blocksListPayload = { block_id: pageId, page_size: 100 };
-  const response = (await withNotionRetry(() => notion.blocks.children.list(blocksListPayload), {
-    operationName: "blocks.children.list",
-    payload: blocksListPayload,
-  })) as {
-    results: Array<{
-      type?: string;
-      paragraph?: { rich_text?: Array<{ plain_text?: string }> };
-    }>;
-  };
-
-  const lines: string[] = [];
-  for (const block of response.results) {
-    if (block.type !== "paragraph") {
-      continue;
-    }
-
-    const text = (block.paragraph?.rich_text ?? []).map((part) => part.plain_text ?? "").join("").trim();
-    if (text) {
-      lines.push(text);
-    }
-  }
-
-  return lines.join("\n");
+  const blocks = await fetchAllBlocks(notion as never, pageId);
+  return blocksToMarkdown(blocks);
 }
 
 async function loadPublishedEntries(input: {

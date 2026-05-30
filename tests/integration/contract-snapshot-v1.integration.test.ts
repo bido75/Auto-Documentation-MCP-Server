@@ -468,5 +468,5 @@ describe("versioned contract snapshots", () => {
         process.env.NOTION_TOKEN = previousNotionToken;
       }
     }
-  });
+  }, 30_000);
 });

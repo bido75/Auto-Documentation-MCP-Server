@@ -1,14 +1,19 @@
 import type { Client } from "@notionhq/client";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import type { DocumentationStatus, ManualEntryDraft, PublishingDecision } from "../types.js";
-import { divider, heading2, paragraphs } from "../lib/notion-blocks.js";
+import { buildManualEntryBlocks } from "./manual-layout.js";
 
 export function decidePublishingStatus(input: {
   mode: "Conservative" | "Balanced" | "Fully Automatic";
   score: number;
   threshold: number;
   hasContradiction?: boolean;
+  forceQueueReview?: boolean;
 }): { status: DocumentationStatus; decision: PublishingDecision } {
+  if (input.forceQueueReview) {
+    return { status: "Needs Review", decision: "Queued Review" };
+  }
+
   if (input.mode === "Conservative") {
     return { status: "Needs Review", decision: "Queued Review" };
   }
@@ -39,6 +44,7 @@ export async function createManualEntry(input: {
   status: DocumentationStatus;
   decision: PublishingDecision;
   confidenceScore: number;
+  reviewerNotes?: string;
   sourceCommit?: string;
   sourcePr?: string;
   filesChanged?: string[];
@@ -55,6 +61,9 @@ export async function createManualEntry(input: {
       Status: { status: { name: input.status } },
       "Confidence Score": { number: input.confidenceScore },
       "Publishing Decision": { select: { name: input.decision } },
+      ...(input.reviewerNotes && {
+        "Reviewer Notes": { rich_text: [{ text: { content: input.reviewerNotes } }] },
+      }),
       ...(input.sourceCommit && {
         "Source Commit": { rich_text: [{ text: { content: input.sourceCommit } }] },
       }),
@@ -94,11 +103,19 @@ export async function createManualEntry(input: {
         },
       }),
     },
-    children: [heading2(input.draft.entryType), ...paragraphs(input.draft.body), divider()],
+    children: buildManualEntryBlocks({
+      title: input.draft.entryTitle,
+      entryType: input.draft.entryType,
+      audience: input.draft.audience,
+      body: input.draft.body,
+      status: input.status,
+      routes: input.draft.routes,
+      apiEndpoints: input.draft.apiEndpoints,
+    }),
   };
 
   const page = await withNotionRetry(() =>
-    input.notion.pages.create(payload),
+    input.notion.pages.create(payload as never),
     {
       operationName: "pages.create",
       payload,

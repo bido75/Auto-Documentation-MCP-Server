@@ -1,12 +1,16 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { getOptionalRuntimeConfig } from "../config.js";
+import { embeddingStore } from "../lib/embedding-store.js";
 import { createNotionClient } from "../lib/notion-client.js";
+import { embedText } from "../providers/factory.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { getStateStore } from "../lib/state-store.js";
 import { createManualEntry } from "../notion/manual-entry.js";
+import type { DedupeDecision } from "../types.js";
 
 function normalizePublishingMode(mode: "conservative" | "balanced" | "fully_automatic") {
   if (mode === "conservative") {
@@ -18,6 +22,18 @@ function normalizePublishingMode(mode: "conservative" | "balanced" | "fully_auto
   }
 
   return "Balanced" as const;
+}
+
+function formatForcedQueueReviewReason(input: {
+  dedupeDecision?: DedupeDecision;
+  matchedExistingFeatureKey?: string;
+}): string | undefined {
+  if (!input.dedupeDecision || input.dedupeDecision === "new_feature_candidate") {
+    return undefined;
+  }
+
+  const target = input.matchedExistingFeatureKey ? ` against ${input.matchedExistingFeatureKey}` : "";
+  return `Forced queue review: low-confidence dedupe match (${input.dedupeDecision}${target}).`;
 }
 
 export function registerUpsertFeatureDocumentationTool(server: McpServer) {
@@ -45,6 +61,8 @@ export function registerUpsertFeatureDocumentationTool(server: McpServer) {
       evidenceEventIds: z.array(z.string()),
       confidenceScore: z.number().min(0).max(100),
       confidenceReasons: z.array(z.string()),
+      dedupeDecision: z.enum(["matched_existing_feature", "new_feature_candidate", "disambiguated_route_collision"]).optional(),
+      matchedExistingFeatureKey: z.string().optional(),
       publishingMode: z.enum(["conservative", "balanced", "fully_automatic"]),
       autoPublishThreshold: z.number().min(0).max(100),
       sourceCommit: z.string().optional(),
@@ -77,10 +95,22 @@ export function registerUpsertFeatureDocumentationTool(server: McpServer) {
         const manualEntriesDatabaseId = input.manualEntriesDatabaseId ?? project.databases.manualEntriesDatabaseId;
 
         const { decidePublishingStatus } = await import("../notion/manual-entry.js");
+        const dedupeDecision = input.dedupeDecision as DedupeDecision | undefined;
+        const shouldForceQueueReview =
+          dedupeDecision !== undefined &&
+          dedupeDecision !== "new_feature_candidate" &&
+          input.confidenceScore < input.autoPublishThreshold;
+        const forcedQueueReviewReason = shouldForceQueueReview
+          ? formatForcedQueueReviewReason({
+              dedupeDecision,
+              matchedExistingFeatureKey: input.matchedExistingFeatureKey,
+            })
+          : undefined;
         const publish = decidePublishingStatus({
           mode: normalizePublishingMode(input.publishingMode),
           score: input.confidenceScore,
           threshold: input.autoPublishThreshold,
+          forceQueueReview: shouldForceQueueReview,
         });
 
         let featurePageId = await store.getFeature(input.projectId, input.featureKey);
@@ -168,6 +198,23 @@ export function registerUpsertFeatureDocumentationTool(server: McpServer) {
 
         await store.setFeature(input.projectId, input.featureKey, featurePageId);
 
+        if (getOptionalRuntimeConfig().embedding.provider !== "none") {
+          await embeddingStore.load();
+          const embedding = await embedText(
+            [input.featureName, ...input.manualEntries.map((entry) => `${entry.title}\n${entry.userGuide}\n${entry.adminGuide}`)].join("\n\n"),
+          ).catch(() => null);
+          if (embedding) {
+            embeddingStore.upsert({
+              featureKey: input.featureKey,
+              featureName: input.featureName,
+              notionPageId: featurePageId,
+              vector: embedding,
+              updatedAt: new Date().toISOString(),
+            });
+            await embeddingStore.save();
+          }
+        }
+
         const pages = [];
         for (const entry of input.manualEntries) {
           const body =
@@ -192,6 +239,7 @@ export function registerUpsertFeatureDocumentationTool(server: McpServer) {
               status: publish.status,
               decision: publish.decision,
               confidenceScore: input.confidenceScore,
+              reviewerNotes: forcedQueueReviewReason,
               sourceCommit: input.sourceCommit,
               sourcePr: input.sourcePr,
               filesChanged: input.filesChanged,
@@ -211,6 +259,8 @@ export function registerUpsertFeatureDocumentationTool(server: McpServer) {
             projectId: input.projectId,
             featureId: featurePageId,
             manualEntryCount: pages.length,
+            dedupeDecision,
+            forcedReviewQueue: shouldForceQueueReview,
             durationMs: Date.now() - startedAt,
           },
         });
