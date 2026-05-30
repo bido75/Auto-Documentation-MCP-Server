@@ -1,0 +1,134 @@
+{
+  "name": "auto-doc-mcp-vscode-extension",
+  "displayName": "Auto-Doc: Living Manual Generator",
+  "description": "Silently writes your user and admin manual in Notion as you code. Powered by MCP.",
+  "version": "0.1.0",
+  "publisher": "local-dev",
+  "private": true,
+  "preview": true,
+  "icon": "assets/icon.png",
+  "galleryBanner": {
+    "color": "#0E7C86",
+    "theme": "dark"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bido75/Auto-Documentation-MCP-Server.git"
+  },
+  "homepage": "https://github.com/bido75/Auto-Documentation-MCP-Server#readme",
+  "bugs": {
+    "url": "https://github.com/bido75/Auto-Documentation-MCP-Server/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Documentation"
+  ],
+  "keywords": [
+    "documentation",
+    "notion",
+    "mcp",
+    "manuals",
+    "developer-tools"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "autoDocMcp.setup",
+        "title": "Auto-Doc: Run Setup Wizard",
+        "icon": "$(notebook)"
+      },
+      {
+        "command": "autoDocMcp.captureNow",
+        "title": "Auto-Doc: Capture Current Git State",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "autoDocMcp.openManual",
+        "title": "Auto-Doc: Open Notion Manual",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "autoDocMcp.viewStatus",
+        "title": "Auto-Doc: View Documentation Status",
+        "icon": "$(graph)"
+      }
+    ],
+    "configuration": {
+      "title": "Auto-Doc MCP",
+      "properties": {
+        "autoDocMcp.projectId": {
+          "type": "string",
+          "default": "",
+          "description": "Internal project ID returned by initialize_project_manual."
+        },
+        "autoDocMcp.notionDatabaseId": {
+          "type": "string",
+          "default": "",
+          "description": "Notion database ID created during setup."
+        },
+        "autoDocMcp.publishingMode": {
+          "type": "string",
+          "enum": ["conservative", "balanced", "fully_automatic"],
+          "default": "balanced",
+          "description": "How aggressively to auto-publish generated documentation."
+        },
+        "autoDocMcp.autoPublishThreshold": {
+          "type": "number",
+          "default": 90,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Confidence score required for automatic publishing."
+        },
+        "autoDocMcp.captureOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Capture a git diff summary on file save."
+        },
+        "autoDocMcp.captureOnCommit": {
+          "type": "boolean",
+          "default": true,
+          "description": "Trigger capture when a new git commit is detected."
+        },
+        "autoDocMcp.enableDeveloperNotes": {
+          "type": "boolean",
+          "default": true,
+          "description": "Include developer notes in generated manual entries."
+        }
+      }
+    },
+    "menus": {
+      "commandPalette": [
+        { "command": "autoDocMcp.setup" },
+        { "command": "autoDocMcp.captureNow" },
+        { "command": "autoDocMcp.openManual" },
+        { "command": "autoDocMcp.viewStatus" }
+      ],
+      "scm/title": [
+        {
+          "command": "autoDocMcp.captureNow",
+          "group": "navigation",
+          "when": "scmProvider == git"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "npx tsc -p tsconfig.json",
+    "copy:server": "node ../../scripts/copy-mcp-server-to-extension.mjs",
+    "package": "npm run copy:server && npm run build && npx @vscode/vsce package",
+    "test": "npx vitest run ../../tests/integration/extension-*.integration.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.7.2"
+  }
+}

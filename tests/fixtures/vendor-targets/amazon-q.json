@@ -1,0 +1,23 @@
+{
+  "tool": "Amazon Q Developer",
+  "status": "supported",
+  "sourceUrls": [
+    "https://docs.aws.amazon.com/amazonq/latest/qdeveloper-ug/mcp-ide.html",
+    "https://github.com/aws/amazon-q-developer-cli/blob/main/docs/agent-format.md#mcpservers-field"
+  ],
+  "documentedConfigPath": "~/.aws/amazonq/default.json",
+  "documentedWorkspacePath": ".amazonq/default.json",
+  "format": "mcpServers",
+  "example": {
+    "mcpServers": {
+      "auto-doc-mcp": {
+        "command": "node",
+        "args": ["/absolute/path/to/build/index.js"],
+        "env": {
+          "NOTION_TOKEN": "__NOTION_TOKEN__"
+        }
+      }
+    }
+  },
+  "notes": "AWS documents IDE MCP configs in default.json and the Q CLI agent format documents mcpServers as a top-level field."
+}

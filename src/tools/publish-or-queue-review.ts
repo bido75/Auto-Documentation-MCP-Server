@@ -1,8 +1,25 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { createNotionClient } from "../lib/notion-client.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
+import { runProjectPreflight } from "../lib/notion-preflight.js";
+import { withNotionRetry } from "../lib/notion-retry.js";
+import { getStateStore } from "../lib/state-store.js";
 import { decidePublishingStatus } from "../notion/manual-entry.js";
+
+const publishOrQueueReviewInputSchema = z.object({
+  projectId: z.string(),
+  featureId: z.string(),
+  manualEntryIds: z.array(z.string()),
+  confidenceScore: z.number().min(0).max(100),
+  publishingMode: z.enum(["conservative", "balanced", "fully_automatic"]),
+  autoPublishThreshold: z.number().min(0).max(100).default(90),
+  hasContradiction: z.boolean().default(false),
+  dedupeDecision: z.enum(["matched_existing_feature", "new_feature_candidate", "disambiguated_route_collision"]).optional(),
+  matchedExistingFeatureKey: z.string().optional(),
+  traceId: z.string().optional(),
+});
 
 function normalizePublishingMode(mode: "conservative" | "balanced" | "fully_automatic") {
   if (mode === "conservative") {
@@ -16,39 +33,100 @@ function normalizePublishingMode(mode: "conservative" | "balanced" | "fully_auto
   return "Balanced" as const;
 }
 
+function formatForcedQueueReviewReason(input: {
+  dedupeDecision?: "matched_existing_feature" | "new_feature_candidate" | "disambiguated_route_collision";
+  matchedExistingFeatureKey?: string;
+}): string | undefined {
+  if (!input.dedupeDecision || input.dedupeDecision === "new_feature_candidate") {
+    return undefined;
+  }
+
+  const target = input.matchedExistingFeatureKey ? ` against ${input.matchedExistingFeatureKey}` : "";
+  return `Forced queue review: low-confidence dedupe match (${input.dedupeDecision}${target}).`;
+}
+
 export function registerPublishOrQueueReviewTool(server: McpServer) {
   server.tool(
     "publish_or_queue_review",
     "Applies project publishing policy to a documentation candidate.",
-    {
-      projectId: z.string(),
-      featureId: z.string(),
-      manualEntryIds: z.array(z.string()),
-      confidenceScore: z.number().min(0).max(100),
-      publishingMode: z.enum(["conservative", "balanced", "fully_automatic"]),
-      autoPublishThreshold: z.number().min(0).max(100).default(90),
-      hasContradiction: z.boolean().default(false),
-      traceId: z.string().optional(),
-    },
-    async (input) => {
-      const traceId = resolveTraceId(input.traceId);
+    publishOrQueueReviewInputSchema.shape,
+    async (rawInput) => {
+      const traceId = resolveTraceId(
+        rawInput && typeof rawInput === "object" && "traceId" in rawInput && typeof rawInput.traceId === "string"
+          ? rawInput.traceId
+          : undefined,
+      );
       const startedAt = Date.now();
-      logToolEvent({
-        level: "info",
-        tool: "publish_or_queue_review",
-        stage: "start",
-        traceId,
-        message: "Applying publishing policy",
-        data: { projectId: input.projectId, featureId: input.featureId, confidenceScore: input.confidenceScore },
-      });
 
       try {
+        const input = publishOrQueueReviewInputSchema.parse(rawInput);
+        logToolEvent({
+          level: "info",
+          tool: "publish_or_queue_review",
+          stage: "start",
+          traceId,
+          message: "Applying publishing policy",
+          data: { projectId: input.projectId, featureId: input.featureId, confidenceScore: input.confidenceScore },
+        });
+
+        const store = getStateStore();
+        const project = await store.getProject(input.projectId);
+        if (!project) {
+          throw new Error("Unknown projectId. Run initialize_project_manual first.");
+        }
+
+        const notion = createNotionClient();
+        await runProjectPreflight({ notion, project });
+
         const status = decidePublishingStatus({
           mode: normalizePublishingMode(input.publishingMode),
           score: input.confidenceScore,
           threshold: input.autoPublishThreshold,
           hasContradiction: input.hasContradiction,
+          forceQueueReview:
+            input.dedupeDecision !== undefined &&
+            input.dedupeDecision !== "new_feature_candidate" &&
+            input.confidenceScore < input.autoPublishThreshold,
         });
+        const forcedQueueReviewReason = formatForcedQueueReviewReason({
+          dedupeDecision: input.dedupeDecision,
+          matchedExistingFeatureKey: input.matchedExistingFeatureKey,
+        });
+
+        const featureUpdatePayload = {
+          page_id: input.featureId,
+          properties: {
+            Status: { status: { name: status.status } },
+            "Confidence Score": { number: input.confidenceScore },
+          },
+        };
+
+        await withNotionRetry(() => notion.pages.update(featureUpdatePayload), {
+          operationName: "pages.update",
+          payload: featureUpdatePayload,
+        });
+
+        for (const manualEntryId of input.manualEntryIds) {
+          const manualEntryPayload = {
+            page_id: manualEntryId,
+            properties: {
+              Status: { status: { name: status.status } },
+              "Confidence Score": { number: input.confidenceScore },
+              "Publishing Decision": { select: { name: status.decision } },
+              ...(status.status === "Needs Review" && forcedQueueReviewReason
+                ? { "Reviewer Notes": { rich_text: [{ text: { content: forcedQueueReviewReason } }] } }
+                : {}),
+              ...(status.status === "Published"
+                ? { "Date Published": { date: { start: new Date().toISOString().slice(0, 10) } } }
+                : {}),
+            },
+          };
+
+          await withNotionRetry(() => notion.pages.update(manualEntryPayload), {
+            operationName: "pages.update",
+            payload: manualEntryPayload,
+          });
+        }
 
         logToolEvent({
           level: "info",
@@ -56,7 +134,12 @@ export function registerPublishOrQueueReviewTool(server: McpServer) {
           stage: "success",
           traceId,
           message: "Applied publishing policy",
-          data: { finalStatus: status.status, durationMs: Date.now() - startedAt },
+          data: {
+            finalStatus: status.status,
+            dedupeDecision: input.dedupeDecision,
+            matchedExistingFeatureKey: input.matchedExistingFeatureKey,
+            durationMs: Date.now() - startedAt,
+          },
         });
 
         return {
@@ -72,8 +155,13 @@ export function registerPublishOrQueueReviewTool(server: McpServer) {
                   publishingDecision: status.decision,
                   reviewNotes:
                     status.status === "Needs Review"
-                      ? "Queued for human review due to score/policy constraints."
+                      ? input.dedupeDecision && input.dedupeDecision !== "new_feature_candidate"
+                        ? `Queued for human review due to low-confidence dedupe match (${input.dedupeDecision}${input.matchedExistingFeatureKey ? ` against ${input.matchedExistingFeatureKey}` : ""}).`
+                        : "Queued for human review due to score/policy constraints."
                       : "Published automatically by confidence policy.",
+                  ...(status.status === "Needs Review" && forcedQueueReviewReason
+                    ? { forcedQueueReviewReason }
+                    : {}),
                 },
                 null,
                 2,
@@ -82,14 +170,16 @@ export function registerPublishOrQueueReviewTool(server: McpServer) {
           ],
         };
       } catch (error) {
-        logToolEvent({
-          level: "error",
-          tool: "publish_or_queue_review",
-          stage: "failure",
-          traceId,
-          message: "Failed to apply publishing policy",
-          data: { error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAt },
-        });
+        if (!(error instanceof z.ZodError)) {
+          logToolEvent({
+            level: "error",
+            tool: "publish_or_queue_review",
+            stage: "failure",
+            traceId,
+            message: "Failed to apply publishing policy",
+            data: { error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAt },
+          });
+        }
         throwAsMcpToolError({
           tool: "publish_or_queue_review",
           traceId,

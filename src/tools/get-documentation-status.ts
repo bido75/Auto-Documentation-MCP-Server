@@ -134,6 +134,7 @@ export function registerGetDocumentationStatusTool(server: McpServer) {
           capturedCount: 0,
           lowConfidenceCount: 0,
           missingReviewQuestions: [] as string[],
+          forcedQueueReasons: [] as string[],
         };
 
         for (const entry of entries) {
@@ -149,6 +150,8 @@ export function registerGetDocumentationStatusTool(server: McpServer) {
             stats.needsReviewCount += 1;
             if (!reviewNotes) {
               stats.missingReviewQuestions.push(`Missing reviewer notes for '${title}'.`);
+            } else if (reviewNotes.toLowerCase().includes("forced queue review:")) {
+              stats.forcedQueueReasons.push(`${title}: ${reviewNotes}`);
             }
           } else if (status === "Captured") {
             stats.capturedCount += 1;
@@ -195,6 +198,7 @@ export function registerGetDocumentationStatusTool(server: McpServer) {
                   capturedCount: stats.capturedCount,
                   lowConfidenceCount: stats.lowConfidenceCount,
                   missingReviewQuestions: stats.missingReviewQuestions,
+                  ...(stats.forcedQueueReasons.length > 0 ? { forcedQueueReasons: stats.forcedQueueReasons } : {}),
                   health,
                 },
                 null,

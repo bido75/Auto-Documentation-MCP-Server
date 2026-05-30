@@ -1,0 +1,9 @@
+{
+  "tool": "Nova",
+  "status": "unsupported_raw_config_target",
+  "sourceUrls": [
+    "https://docs.nova.app/extensions/",
+    "https://docs.nova.app/extensions/manifest/"
+  ],
+  "notes": "Nova documents extension development through extension.json manifests, not a raw Application Support/Nova/auto-doc-mcp.json MCP config file."
+}

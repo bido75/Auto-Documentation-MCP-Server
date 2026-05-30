@@ -63,12 +63,15 @@
         "audiences",
         "confidenceReasons",
         "confidenceScore",
+        "dedupeDecision",
         "entryTypes",
         "fallbackEntryId",
         "fallbackReasonCode",
         "fallbackStatus",
         "featureKey",
         "featureName",
+        "generatedNarratives",
+        "matchedExistingFeatureKey",
         "reviewQuestions",
         "shouldDocument",
         "traceId"
@@ -88,6 +91,9 @@
         },
         "confidenceScore": {
           "type": "number"
+        },
+        "dedupeDecision": {
+          "type": "string"
         },
         "entryTypes": {
           "type": "array",
@@ -109,6 +115,93 @@
         },
         "featureName": {
           "type": "string"
+        },
+        "generatedNarratives": {
+          "type": "object",
+          "required": [
+            "adminGuide",
+            "providerUsed",
+            "userGuide"
+          ],
+          "properties": {
+            "adminGuide": {
+              "type": "object",
+              "required": [
+                "configRequired",
+                "endpointsAffected",
+                "envVarsRequired",
+                "troubleshooting",
+                "verificationSteps"
+              ],
+              "properties": {
+                "configRequired": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "endpointsAffected": {
+                  "type": "array",
+                  "items": {
+                    "type": "unknown"
+                  }
+                },
+                "envVarsRequired": {
+                  "type": "array",
+                  "items": {
+                    "type": "unknown"
+                  }
+                },
+                "troubleshooting": {
+                  "type": "array",
+                  "items": {
+                    "type": "unknown"
+                  }
+                },
+                "verificationSteps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "providerUsed": {
+              "type": "string"
+            },
+            "userGuide": {
+              "type": "object",
+              "required": [
+                "expectedOutcome",
+                "possibleErrors",
+                "steps",
+                "summary"
+              ],
+              "properties": {
+                "expectedOutcome": {
+                  "type": "string"
+                },
+                "possibleErrors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "summary": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "matchedExistingFeatureKey": {
+          "type": "null"
         },
         "reviewQuestions": {
           "type": "array",
@@ -227,6 +320,7 @@
       "type": "object",
       "required": [
         "excludedEntryCount",
+        "excludedReasons",
         "format",
         "includedEntryCount",
         "output",
@@ -237,6 +331,12 @@
       "properties": {
         "excludedEntryCount": {
           "type": "number"
+        },
+        "excludedReasons": {
+          "type": "array",
+          "items": {
+            "type": "unknown"
+          }
         },
         "format": {
           "type": "string"

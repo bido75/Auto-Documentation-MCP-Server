@@ -79,7 +79,16 @@ describe("package_manual existing release behavior", () => {
         };
       }) => {
         if (input.database_id === "db_releases") {
-          return { results: [{ id: "release_page_existing" }] };
+          return {
+            results: [
+              {
+                id: "release_page_existing",
+                properties: {
+                  "Manual URL": { url: null },
+                },
+              },
+            ],
+          };
         }
 
         if (input.database_id === "db_manual") {
@@ -103,6 +112,15 @@ describe("package_manual existing release behavior", () => {
                   Feature: { relation: [{ id: "feature_2" }] },
                 },
               },
+              {
+                id: "manual_3",
+                properties: {
+                  "Entry Title": { title: [{ text: { content: "Legacy note" } }] },
+                  Audience: { select: { name: "Internal" } },
+                  Status: { status: { name: "Captured" } },
+                  Feature: { relation: [] },
+                },
+              },
             ],
           };
         }
@@ -110,9 +128,16 @@ describe("package_manual existing release behavior", () => {
         return { results: [] };
       },
     );
-    const create = vi.fn(async () => ({ id: "release_page_new" }));
-    const update = vi.fn(async () => ({}));
+    const create = vi.fn(async (input: { parent?: { database_id?: string; page_id?: string } }) => {
+      if (input.parent?.page_id) {
+        return { id: "manual_page_1", url: "https://notion.local/manual_page_1" };
+      }
+
+      return { id: "release_page_new", url: "https://notion.local/release_page_new" };
+    });
+    const update = vi.fn(async (input: { page_id: string }) => ({ id: input.page_id, url: `https://notion.local/${input.page_id}` }));
     const listBlocks = vi.fn(async () => ({ results: [] }));
+    const appendBlocks = vi.fn(async () => ({ results: [] }));
 
     testContext.notion = {
       databases: {
@@ -125,6 +150,7 @@ describe("package_manual existing release behavior", () => {
       blocks: {
         children: {
           list: listBlocks,
+          append: appendBlocks,
         },
       },
     };
@@ -136,7 +162,13 @@ describe("package_manual existing release behavior", () => {
     const pack = server.handlers.get("package_manual");
     expect(pack).toBeDefined();
 
-    const result = parseToolResult<{ releasePageId: string }>(
+    const result = parseToolResult<{
+      releasePageId: string;
+      output: string;
+      includedEntryCount: number;
+      excludedEntryCount: number;
+      excludedReasons: string[];
+    }>(
       await pack!({
         projectId: "proj_1",
         releaseVersion: "1.0.0",
@@ -146,6 +178,16 @@ describe("package_manual existing release behavior", () => {
     );
 
     expect(result.releasePageId).toBe("release_page_existing");
+    expect(result.includedEntryCount).toBe(2);
+    expect(result.excludedEntryCount).toBe(1);
+    expect(result.excludedReasons.length).toBe(1);
+    expect(result.excludedReasons[0]).toContain("Legacy note");
+    expect(result.output).toContain("# Acme - 1.0.0 Manual");
+    expect(result.output).toContain("## User Guide");
+    expect(result.output).toContain("## Admin Guide");
+    expect(result.output).toContain("## What's New in 1.0.0");
+    expect(result.output).toContain("User thing");
+    expect(result.output).toContain("Admin thing");
     expect(create).not.toHaveBeenCalled();
 
     const releaseUpdateCall = update.mock.calls.find((call) => call[0].page_id === "release_page_existing");
@@ -169,5 +211,30 @@ describe("package_manual existing release behavior", () => {
         properties: { Release: { relation: [{ id: "release_page_existing" }] } },
       }),
     );
+
+    const notionPageResult = parseToolResult<{ output: string; format: string; releasePageId: string }>(
+      await pack!({
+        projectId: "proj_1",
+        releaseVersion: "1.0.0",
+        audience: "both",
+        format: "notion_page",
+      }),
+    );
+
+    expect(notionPageResult.format).toBe("notion_page");
+    expect(notionPageResult.releasePageId).toBe("release_page_existing");
+    expect(notionPageResult.output).toBe("https://notion.local/manual_page_1");
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        parent: { page_id: "parent_1" },
+      }),
+    );
+    expect(update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        page_id: "release_page_existing",
+        properties: { "Manual URL": { url: "https://notion.local/manual_page_1" } },
+      }),
+    );
+    expect(appendBlocks).not.toHaveBeenCalled();
   });
 });

@@ -1,15 +1,13 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { scoreDocumentationConfidence } from "../analysis/confidence.js";
-import { createFeatureKey } from "../analysis/feature-key.js";
-import { classifyManualWorthiness } from "../analysis/manual-worthiness.js";
 import { createNotionClient } from "../lib/notion-client.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
 import { withNotionRetry } from "../lib/notion-retry.js";
+import { analyzeDocumentationCandidate } from "../lib/analyzer.js";
 import type { EventSnapshot, ProjectState } from "../lib/state-store.js";
-import type { AnalyzeDocumentationCandidateResult, AnalyzeFallbackReasonCode, EntryType } from "../types.js";
+import type { AnalyzeDocumentationCandidateResult, AnalyzeFallbackReasonCode } from "../types.js";
 import { getStateStore } from "../lib/state-store.js";
 
 const FALLBACK_REASON_CODES: Record<string, AnalyzeFallbackReasonCode> = {
@@ -18,66 +16,6 @@ const FALLBACK_REASON_CODES: Record<string, AnalyzeFallbackReasonCode> = {
   ANALYZER_EXCEPTION_PERSISTED: "analyzer_exception_fallback_persisted",
   ANALYZER_EXCEPTION_PERSIST_FAILED: "analyzer_exception_fallback_persist_failed",
 };
-
-function toTitleCase(input: string): string {
-  return input
-    .split(/[^a-zA-Z0-9]+/)
-    .filter(Boolean)
-    .map((part) => `${part[0].toUpperCase()}${part.slice(1).toLowerCase()}`)
-    .join(" ");
-}
-
-function inferFeatureNameFromEvidence(summaries: string[]): string {
-  const first = summaries.find((summary) => summary.trim().length > 0) ?? "Captured Feature Update";
-  const normalized = first
-    .replace(/^(add|added|create|created|implement|implemented|update|updated|fix|fixed)\s+/i, "")
-    .replace(/[\.;:].*$/, "")
-    .trim();
-
-  return toTitleCase(normalized || "Captured Feature Update");
-}
-
-function inferModuleFromEvidence(haystack: string): string | undefined {
-  const checks: Array<[string, string]> = [
-    ["auth", "Auth"],
-    ["billing", "Billing"],
-    ["admin", "Admin Panel"],
-    ["report", "Reports"],
-    ["api", "API"],
-    ["frontend", "Frontend"],
-    ["backend", "Backend"],
-  ];
-
-  for (const [needle, moduleName] of checks) {
-    if (haystack.includes(needle)) {
-      return moduleName;
-    }
-  }
-
-  return undefined;
-}
-
-function inferRoute(filesChanged: string[], summaries: string[]): string | undefined {
-  const routeFromFile = filesChanged.find((path) => path.includes("/routes/") || path.includes("\\routes\\"));
-  if (routeFromFile) {
-    const normalized = routeFromFile.replaceAll("\\", "/");
-    const match = normalized.match(/routes\/(.+?)\.[a-z0-9]+$/i);
-    if (match?.[1]) {
-      return `/${match[1]}`;
-    }
-  }
-
-  const summaryRoute = summaries.join(" ").match(/\/(?:[a-z0-9\-_]+\/?)+/i);
-  return summaryRoute?.[0];
-}
-
-function inferMergedOrReleased(eventTypes: string[]): boolean {
-  return eventTypes.includes("pr_merged") || eventTypes.includes("release_tagged");
-}
-
-function inferTestsPassed(testStatuses: Array<string | undefined>, eventTypes: string[]): boolean {
-  return testStatuses.includes("passed") || eventTypes.includes("tests_passed");
-}
 
 async function persistCapturedAnalyzerFallback(input: {
   project: ProjectState;
@@ -159,18 +97,19 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
 
         if (evidence.length === 0) {
           const response: AnalyzeDocumentationCandidateResult = {
-          shouldDocument: false,
-          featureKey: "general:captured-feature-update",
-          featureName: "Captured Feature Update",
-          audiences: [],
-          entryTypes: [],
-          confidenceScore: 0,
-          confidenceReasons: ["No usable evidence snapshots found for provided evidenceEventIds."],
-          reviewQuestions: ["Was the evidence event captured successfully before analysis?"],
-          fallbackStatus: "Captured",
-          fallbackEntryId: null,
-          fallbackReasonCode: FALLBACK_REASON_CODES.NO_USABLE_EVIDENCE,
-        };
+            shouldDocument: false,
+            featureKey: "general:captured-feature-update",
+            featureName: "Captured Feature Update",
+            audiences: [],
+            entryTypes: [],
+            confidenceScore: 0,
+            confidenceReasons: ["No usable evidence snapshots found for provided evidenceEventIds."],
+            reviewQuestions: ["Was the evidence event captured successfully before analysis?"],
+            fallbackStatus: "Captured",
+            fallbackEntryId: null,
+            fallbackReasonCode: FALLBACK_REASON_CODES.NO_USABLE_EVIDENCE,
+            generatedNarratives: null,
+          };
 
           logToolEvent({
           level: "warn",
@@ -191,65 +130,29 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
           };
         }
 
-        const summaries = evidence.map((item) => item.summary);
-        const filesChanged = evidence.flatMap((item) => item.filesChanged);
-        const eventTypes = evidence.map((item) => item.eventType);
-        const testStatuses = evidence.map((item) => item.testStatus);
-
-        const featureName = inferFeatureNameFromEvidence(summaries);
+        const featureName = evidence[0]?.summary || "Captured Feature Update";
 
         try {
-          const evidenceHaystack = `${summaries.join(" ")} ${filesChanged.join(" ")}`.toLowerCase();
-        const moduleName = inferModuleFromEvidence(evidenceHaystack);
-        const route = inferRoute(filesChanged, summaries);
-
-        const worthiness = classifyManualWorthiness({
-          summary: summaries.join("\n"),
-          filesChanged,
-        });
-
-        const featureKey = createFeatureKey({
-          module: moduleName,
-          featureName,
-          route,
-        });
-
-        const existingHit = input.existingFeatureKeys?.includes(featureKey) ?? false;
-        const confidence = scoreDocumentationConfidence({
-          manualWorthy: worthiness.shouldDocument,
-          featureNameMatched: summaries.join(" ").toLowerCase().includes(featureName.toLowerCase()),
-          testsPassed: inferTestsPassed(testStatuses, eventTypes),
-          mergedOrReleased: inferMergedOrReleased(eventTypes),
-          concreteDocumentation: summaries.join(" ").length > 80,
-          ambiguousPurpose: !worthiness.shouldDocument,
-          duplicateUncertain: !existingHit && (input.existingFeatureKeys?.length ?? 0) > 0,
-        });
-
-        const audiences = worthiness.audiences;
-        const entryTypes = audiences.flatMap<EntryType>((audience) => {
-          if (audience === "User") {
-            return ["User Guide"];
-          }
-
-          if (audience === "Admin") {
-            return ["Admin Guide"];
-          }
-
-          return [];
-        });
+          const analyzed = await analyzeDocumentationCandidate({
+            evidence,
+            existingFeatureKeys: input.existingFeatureKeys,
+          });
 
         const response: AnalyzeDocumentationCandidateResult = {
-          shouldDocument: worthiness.shouldDocument,
-          featureKey,
-          featureName,
-          audiences,
-          entryTypes,
-          confidenceScore: confidence.score,
-          confidenceReasons: [...worthiness.reasons, ...confidence.reasons],
-          reviewQuestions: confidence.reviewQuestions,
+          shouldDocument: analyzed.shouldDocument,
+          featureKey: analyzed.featureKey,
+          featureName: analyzed.featureName,
+          audiences: analyzed.audiences,
+          entryTypes: analyzed.entryTypes,
+          confidenceScore: analyzed.confidenceScore,
+          confidenceReasons: analyzed.confidenceReasons,
+          reviewQuestions: analyzed.reviewQuestions,
           fallbackStatus: null,
           fallbackEntryId: null,
           fallbackReasonCode: FALLBACK_REASON_CODES.NONE,
+          dedupeDecision: analyzed.dedupeDecision,
+          matchedExistingFeatureKey: analyzed.matchedExistingFeatureKey,
+          generatedNarratives: analyzed.generatedNarratives,
         };
 
         logToolEvent({
@@ -262,6 +165,9 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
             projectId: input.projectId,
             shouldDocument: response.shouldDocument,
             confidenceScore: response.confidenceScore,
+            dedupeDecision: response.dedupeDecision,
+            matchedExistingFeatureKey: response.matchedExistingFeatureKey,
+            generatedNarratives: response.generatedNarratives !== null,
             durationMs: Date.now() - startedAt,
           },
         });
@@ -313,6 +219,7 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
           fallbackReasonCode: fallbackPersistenceError
             ? FALLBACK_REASON_CODES.ANALYZER_EXCEPTION_PERSIST_FAILED
             : FALLBACK_REASON_CODES.ANALYZER_EXCEPTION_PERSISTED,
+            generatedNarratives: null,
         };
 
         logToolEvent({

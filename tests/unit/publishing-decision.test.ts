@@ -22,4 +22,18 @@ describe("decidePublishingStatus", () => {
       decision: "Queued Review",
     });
   });
+
+  it("forces queued review when dedupe policy requests human verification", () => {
+    expect(
+      decidePublishingStatus({
+        mode: "Fully Automatic",
+        score: 70,
+        threshold: 90,
+        forceQueueReview: true,
+      }),
+    ).toEqual({
+      status: "Needs Review",
+      decision: "Queued Review",
+    });
+  });
 });

@@ -1,0 +1,10 @@
+{
+  "tool": "Pieces for Developers",
+  "status": "unsupported_raw_config_target",
+  "sourceUrls": [
+    "https://docs.pieces.app/products/mcp",
+    "https://docs.pieces.app/products/mcp/vs-code",
+    "https://docs.pieces.app/products/mcp/continue-dev"
+  ],
+  "notes": "Pieces does not document a generic ~/.pieces/mcp.json-style raw target, but it does publish host-specific VS Code and Continue.dev setup surfaces. This installer now models those documented host configs through workspace writers instead of reviving the unsupported generic Pieces target."
+}

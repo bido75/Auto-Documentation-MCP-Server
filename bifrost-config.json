@@ -1,0 +1,33 @@
+{
+  "mcp_servers": [
+    {
+      "name": "auto-doc-mcp",
+      "description": "Auto-Documentation MCP - writes Notion manuals as you code",
+      "url": "http://notion-auto-doc:3000/sse",
+      "transport": "sse",
+      "health_check": "http://notion-auto-doc:3000/health",
+      "auth": {
+        "type": "header",
+        "key": "x-notion-token",
+        "value_from_env": "NOTION_TOKEN"
+      },
+      "tool_filter": {
+        "mode": "allowlist",
+        "tools": [
+          "initialize_project_manual",
+          "capture_development_event",
+          "analyze_documentation_candidate",
+          "upsert_feature_documentation",
+          "publish_or_queue_review",
+          "package_manual",
+          "get_documentation_status",
+          "get_git_diff_summary"
+        ]
+      },
+      "rate_limits": {
+        "requests_per_minute": 60,
+        "requests_per_hour": 500
+      }
+    }
+  ]
+}

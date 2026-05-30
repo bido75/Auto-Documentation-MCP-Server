@@ -175,4 +175,5 @@ describe("analyze_documentation_candidate fallback", () => {
     expect(result.fallbackEntryId).toBeNull();
     expect(result.fallbackReasonCode).toBe("no_usable_evidence");
   });
+
 });

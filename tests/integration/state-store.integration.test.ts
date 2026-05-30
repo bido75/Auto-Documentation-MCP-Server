@@ -59,8 +59,9 @@ describe("StateStore", () => {
       eventSnapshots: {},
     });
 
-    const content = JSON.parse(await readFile(filePath, "utf8")) as { schemaVersion?: number };
+    const content = JSON.parse(await readFile(filePath, "utf8")) as { schemaVersion?: number; encryptedState?: string };
     expect(content.schemaVersion).toBe(CURRENT_STATE_SCHEMA_VERSION);
+    expect(typeof content.encryptedState).toBe("string");
   });
 
   it("migrates legacy unversioned state and backfills eventSnapshots", async () => {
@@ -103,9 +104,88 @@ describe("StateStore", () => {
 
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
       schemaVersion?: number;
-      projects?: Record<string, { eventSnapshots?: Record<string, unknown> }>;
+      encryptedState?: string;
     };
     expect(persisted.schemaVersion).toBe(CURRENT_STATE_SCHEMA_VERSION);
-    expect(persisted.projects?.proj_legacy?.eventSnapshots).toEqual({});
+    expect(typeof persisted.encryptedState).toBe("string");
+  });
+
+  it("persists runner last-seen release tags across store instances", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "auto-doc-state-release-tags-"));
+    const filePath = join(dir, "state.json");
+    const store = new StateStore(filePath);
+
+    await store.setLastSeenReleaseTag("proj_1", "C:/repo", "v2.0.0");
+
+    const reloaded = new StateStore(filePath);
+    expect(await reloaded.getLastSeenReleaseTag("proj_1", "C:/repo")).toBe("v2.0.0");
+    expect(await reloaded.getLastSeenReleaseTag("proj_1", "C:/other")).toBeNull();
+  });
+
+  it("persists release automation run records across store instances", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "auto-doc-state-release-ledger-"));
+    const filePath = join(dir, "state.json");
+    const store = new StateStore(filePath);
+
+    await store.setReleaseAutomationRun({
+      projectId: "proj_1",
+      repoPath: "C:/repo",
+      releaseTag: "v3.1.0",
+      releaseVersion: "3.1.0",
+      status: "failure",
+      attemptedAt: "2026-05-26T00:00:00.000Z",
+      errorMessage: "release pipeline failed",
+    });
+
+    const reloaded = new StateStore(filePath);
+    expect(await reloaded.getReleaseAutomationRun("proj_1", "C:/repo", "v3.1.0")).toEqual(
+      expect.objectContaining({
+        projectId: "proj_1",
+        repoPath: "C:/repo",
+        releaseTag: "v3.1.0",
+        status: "failure",
+        errorMessage: "release pipeline failed",
+      }),
+    );
+    expect(await reloaded.getReleaseAutomationRun("proj_1", "C:/repo", "v3.2.0")).toBeNull();
+  });
+
+  it("persists runner failure triage metadata across store instances", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "auto-doc-state-triage-metadata-"));
+    const filePath = join(dir, "state.json");
+    const store = new StateStore(filePath);
+
+    await store.setRunnerFailureTriageMetadata("proj_1", "C:/repo", {
+      acknowledgedAt: "2026-05-26T04:00:00.000Z",
+      acknowledgedBy: "ops@example.com",
+      note: "Known vendor outage",
+      cooldownUntil: "2026-05-26T08:00:00.000Z",
+    });
+
+    const reloaded = new StateStore(filePath);
+    expect(await reloaded.getRunnerFailureTriageMetadata("proj_1", "C:/repo")).toEqual({
+      acknowledgedAt: "2026-05-26T04:00:00.000Z",
+      acknowledgedBy: "ops@example.com",
+      note: "Known vendor outage",
+      cooldownUntil: "2026-05-26T08:00:00.000Z",
+    });
+
+    await reloaded.clearRunnerFailureTriageMetadata("proj_1", "C:/repo");
+    expect(await reloaded.getRunnerFailureTriageMetadata("proj_1", "C:/repo")).toBeNull();
+
+    const history = await reloaded.listRunnerFailureTriageHistory("proj_1", "C:/repo", 5);
+    expect(history).toHaveLength(2);
+    expect(history[0]?.action).toBe("clear");
+    expect(history[1]).toEqual(
+      expect.objectContaining({
+        action: "set",
+        metadata: {
+          acknowledgedAt: "2026-05-26T04:00:00.000Z",
+          acknowledgedBy: "ops@example.com",
+          note: "Known vendor outage",
+          cooldownUntil: "2026-05-26T08:00:00.000Z",
+        },
+      }),
+    );
   });
 });
