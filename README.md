@@ -61,6 +61,41 @@ node scripts/sync-prompt-repo.mjs --endpoint http://localhost:8080 --model llama
 
 Auth: if your prompt-repo endpoint requires auth, export `AI_API_KEY` or pass `--api-key`.
 
+### CI Drift Guard
+
+CI runs `npm run prompts:sync:dry-run` as a required guard in `.github/workflows/ci.yml`.
+
+Set these repository secrets so CI can query your prompt repository:
+
+- `BIFROST_PROMPT_REPO_ENDPOINT` (example: `https://bifrost.your-domain.com`)
+- `BIFROST_PROMPT_REPO_API_KEY` (optional if endpoint is public)
+
+If drift is detected, CI fails and prints which prompt would require a new version.
+
+## Cloud Failover Smoke Test
+
+Use the one-command smoke test to force local model failure and verify OpenRouter fallback is actually used.
+
+1. Export your OpenRouter key:
+
+```bash
+export OPENROUTER_API_KEY=<your-openrouter-key>
+```
+
+2. Run:
+
+```bash
+npm run failover:smoke
+```
+
+Optional overrides:
+
+```bash
+node scripts/forced-cloud-failover-smoke.mjs --cloud-model openai/gpt-4o-mini --endpoint http://localhost:8080/v1 --bifrost-endpoint http://localhost:8080
+```
+
+Success criteria: output contains `providerUsed` starting with `openrouter:` and exits with code `0`.
+
 ## CI
 
 GitHub Actions runs typecheck, tests, and build on pushes and pull requests to `main`.

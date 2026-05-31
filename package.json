@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "start": "node build/index.js",
     "prompts:sync": "node scripts/sync-prompt-repo.mjs",
-    "prompts:sync:dry-run": "node scripts/sync-prompt-repo.mjs --dry-run"
+    "prompts:sync:dry-run": "node scripts/sync-prompt-repo.mjs --dry-run",
+    "failover:smoke": "node scripts/forced-cloud-failover-smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
