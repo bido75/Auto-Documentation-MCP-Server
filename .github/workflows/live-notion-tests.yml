@@ -5,11 +5,20 @@ on:
 
 jobs:
   live-notion-tests:
-    if: ${{ secrets.NOTION_TOKEN != '' && secrets.NOTION_PARENT_PAGE_ID != '' }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Validate required secrets
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_PARENT_PAGE_ID: ${{ secrets.NOTION_PARENT_PAGE_ID }}
+        run: |
+          if [ -z "${NOTION_TOKEN}" ] || [ -z "${NOTION_PARENT_PAGE_ID}" ]; then
+            echo "Missing required secrets: NOTION_TOKEN and/or NOTION_PARENT_PAGE_ID"
+            exit 1
+          fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
