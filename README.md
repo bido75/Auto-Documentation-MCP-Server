@@ -30,6 +30,37 @@ npm run dev
 - `NOTION_PARENT_PAGE_ID` for live integration tests
 - `RUN_LIVE_NOTION_TESTS=true` to enable env-gated live tests
 
+## Prompt Repository Sync
+
+Use the committed utility to keep Bifrost prompt-repo entries aligned with runtime defaults for:
+
+- `auto-doc-analyzer`
+- `auto-doc-reviewer`
+- `auto-doc-gap-filler`
+- `auto-doc-staleness-updater`
+
+The script is idempotent: it only creates a new prompt version when content or model metadata changed.
+
+Dry-run preview:
+
+```bash
+npm run prompts:sync:dry-run
+```
+
+Apply updates:
+
+```bash
+npm run prompts:sync
+```
+
+Optional overrides:
+
+```bash
+node scripts/sync-prompt-repo.mjs --endpoint http://localhost:8080 --model llama3.2:3b-instruct-q4_K_M --temperature 0.1 --max-tokens 2048
+```
+
+Auth: if your prompt-repo endpoint requires auth, export `AI_API_KEY` or pass `--api-key`.
+
 ## CI
 
 GitHub Actions runs typecheck, tests, and build on pushes and pull requests to `main`.
