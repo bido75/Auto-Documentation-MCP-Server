@@ -22,8 +22,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Normalize and validate endpoint input early.
+          BIFROST_ENDPOINT="$(printf '%s' "${BIFROST_ENDPOINT:-}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
           if [ -z "${BIFROST_ENDPOINT:-}" ]; then
             echo "Missing endpoint input. Provide 'endpoint' when manually triggering the workflow."
+            exit 1
+          fi
+
+          if [[ ! "${BIFROST_ENDPOINT}" =~ ^https?:// ]]; then
+            echo "Invalid endpoint '${BIFROST_ENDPOINT}'. Use a full URL starting with http:// or https://"
             exit 1
           fi
 
