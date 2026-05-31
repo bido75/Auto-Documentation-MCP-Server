@@ -187,6 +187,8 @@ async function postJson(url, payload, headers) {
 async function main() {
   const endpoint = normalizeEndpoint(getArgValue("--endpoint") || process.env.BIFROST_ENDPOINT || DEFAULT_ENDPOINT);
   const apiKey = getArgValue("--api-key") || process.env.AI_API_KEY || "";
+  const basicAuthUsername = getArgValue("--basic-auth-username") || process.env.BIFROST_BASIC_AUTH_USERNAME || "";
+  const basicAuthPassword = getArgValue("--basic-auth-password") || process.env.BIFROST_BASIC_AUTH_PASSWORD || "";
   const model = getArgValue("--model") || process.env.AI_MODEL_NAME || DEFAULT_MODEL;
   const provider = getArgValue("--provider") || DEFAULT_PROVIDER;
   const temperature = Number(getArgValue("--temperature") || DEFAULT_TEMPERATURE);
@@ -194,7 +196,10 @@ async function main() {
   const dryRun = hasFlag("--dry-run");
 
   const headers = {};
-  if (apiKey.trim().length > 0) {
+  if (basicAuthUsername.trim().length > 0 && basicAuthPassword.trim().length > 0) {
+    const encoded = Buffer.from(`${basicAuthUsername.trim()}:${basicAuthPassword.trim()}`, "utf8").toString("base64");
+    headers.Authorization = `Basic ${encoded}`;
+  } else if (apiKey.trim().length > 0) {
     headers.Authorization = `Bearer ${apiKey.trim()}`;
   }
 

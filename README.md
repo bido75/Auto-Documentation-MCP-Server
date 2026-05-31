@@ -59,7 +59,8 @@ Optional overrides:
 node scripts/sync-prompt-repo.mjs --endpoint http://localhost:8080 --model llama3.2:3b-instruct-q4_K_M --temperature 0.1 --max-tokens 2048
 ```
 
-Auth: if your prompt-repo endpoint requires auth, export `AI_API_KEY` or pass `--api-key`.
+Auth: if your prompt-repo endpoint requires auth, export `AI_API_KEY` or pass `--api-key` for Bearer mode.
+For HTTP Basic Auth, export `BIFROST_BASIC_AUTH_USERNAME` and `BIFROST_BASIC_AUTH_PASSWORD` (or pass `--basic-auth-username` / `--basic-auth-password`).
 
 ### CI Drift Guard
 
