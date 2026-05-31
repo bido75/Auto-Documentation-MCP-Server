@@ -36,11 +36,30 @@ jobs:
         env:
           BIFROST_ENDPOINT: ${{ vars['BIFROST_PROMPT_REPO_ENDPOINT'] || secrets['BIFROST_PROMPT_REPO_ENDPOINT'] }}
           AI_API_KEY: ${{ vars['BIFROST_PROMPT_REPO_API_KEY'] || secrets['BIFROST_PROMPT_REPO_API_KEY'] || 'ollama' }}
+          BIFROST_BASIC_AUTH_USERNAME: ${{ vars['BIFROST_BASIC_AUTH_USERNAME'] || secrets['BIFROST_BASIC_AUTH_USERNAME'] || '' }}
+          BIFROST_BASIC_AUTH_PASSWORD: ${{ secrets['BIFROST_BASIC_AUTH_PASSWORD'] || '' }}
         run: |
+          set -euo pipefail
+
           if [ -z "$BIFROST_ENDPOINT" ]; then
             echo "Missing secret BIFROST_PROMPT_REPO_ENDPOINT for prompt drift guard."
             exit 1
           fi
+
+          # If endpoint is protected with HTTP Basic Auth, inject credentials at runtime
+          # so repository secrets do not need to embed user:pass in the endpoint URL.
+          if [ -n "${BIFROST_BASIC_AUTH_USERNAME:-}" ] && [ -n "${BIFROST_BASIC_AUTH_PASSWORD:-}" ]; then
+            SCHEME="$(printf '%s' "$BIFROST_ENDPOINT" | sed -E 's#^(https?)://.*#\1#')"
+            REST="$(printf '%s' "$BIFROST_ENDPOINT" | sed -E 's#^https?://##')"
+            REST="${REST#*@}"
+            export BIFROST_ENDPOINT="${SCHEME}://${BIFROST_BASIC_AUTH_USERNAME}:${BIFROST_BASIC_AUTH_PASSWORD}@${REST}"
+            echo "Prompt drift guard auth mode: basic"
+          elif [ -n "${AI_API_KEY:-}" ]; then
+            echo "Prompt drift guard auth mode: bearer"
+          else
+            echo "Prompt drift guard auth mode: none"
+          fi
+
           npm run prompts:sync:dry-run
 
       - name: Typecheck

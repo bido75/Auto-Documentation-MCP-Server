@@ -19,6 +19,8 @@ jobs:
         env:
           BIFROST_ENDPOINT: ${{ inputs.endpoint }}
           AI_API_KEY: ${{ vars['BIFROST_PROMPT_REPO_API_KEY'] || secrets['BIFROST_PROMPT_REPO_API_KEY'] || '' }}
+          BIFROST_BASIC_AUTH_USERNAME: ${{ vars['BIFROST_BASIC_AUTH_USERNAME'] || secrets['BIFROST_BASIC_AUTH_USERNAME'] || '' }}
+          BIFROST_BASIC_AUTH_PASSWORD: ${{ secrets['BIFROST_BASIC_AUTH_PASSWORD'] || '' }}
         run: |
           set -euo pipefail
 
@@ -43,15 +45,24 @@ jobs:
 
           TARGET="${BIFROST_ENDPOINT%/}/api/prompt-repo/prompts"
           echo "Probing endpoint: ${TARGET}"
-          if [ -n "${AI_API_KEY:-}" ]; then
-            echo "Auth header: enabled"
+          if [ -n "${BIFROST_BASIC_AUTH_USERNAME:-}" ] && [ -n "${BIFROST_BASIC_AUTH_PASSWORD:-}" ]; then
+            echo "Auth mode: basic"
+          elif [ -n "${AI_API_KEY:-}" ]; then
+            echo "Auth mode: bearer"
           else
-            echo "Auth header: disabled"
+            echo "Auth mode: none"
           fi
 
           # Capture only safe diagnostics (no response body logging).
           set +e
-          if [ -n "${AI_API_KEY:-}" ]; then
+          if [ -n "${BIFROST_BASIC_AUTH_USERNAME:-}" ] && [ -n "${BIFROST_BASIC_AUTH_PASSWORD:-}" ]; then
+            METRICS=$(curl -sS -o /tmp/prompt_probe_body.json \
+              -w "http_code=%{http_code}\nremote_ip=%{remote_ip}\ntime_connect=%{time_connect}\ntime_total=%{time_total}\nsize_download=%{size_download}\n" \
+              --connect-timeout 10 --max-time 25 \
+              -u "${BIFROST_BASIC_AUTH_USERNAME}:${BIFROST_BASIC_AUTH_PASSWORD}" \
+              "$TARGET")
+            CURL_EXIT=$?
+          elif [ -n "${AI_API_KEY:-}" ]; then
             METRICS=$(curl -sS -o /tmp/prompt_probe_body.json \
               -w "http_code=%{http_code}\nremote_ip=%{remote_ip}\ntime_connect=%{time_connect}\ntime_total=%{time_total}\nsize_download=%{size_download}\n" \
               --connect-timeout 10 --max-time 25 \
