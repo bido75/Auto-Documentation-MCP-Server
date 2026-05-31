@@ -86,7 +86,7 @@ If drift is detected, CI fails and prints which prompt would require a new versi
 Use manual workflow `.github/workflows/prompt-endpoint-connectivity.yml` to validate Actions networking and auth to your configured prompt endpoint.
 
 - Trigger from GitHub Actions: `Prompt Endpoint Connectivity Check`.
-- Optional workflow input: `endpoint` (overrides repo variable/secret for a one-off run).
+- Required workflow input: `endpoint` (example: `https://bifrost.giscop.com`).
 - Prints safe diagnostics only (HTTP code, connect/total time, remote IP, response size).
 - If endpoint is missing or unreachable from GitHub-hosted runners, the workflow fails with explicit guidance.
 

@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
     inputs:
       endpoint:
-        description: "Optional override endpoint (e.g. https://bifrost.giscop.com or http://host:8080)"
-        required: false
+        description: "Bifrost base URL (e.g. https://bifrost.giscop.com)"
+        required: true
         type: string
 
 jobs:
@@ -17,14 +17,13 @@ jobs:
     steps:
       - name: Resolve endpoint and run safe connectivity probe
         env:
-          BIFROST_ENDPOINT: ${{ inputs.endpoint || vars['BIFROST_PROMPT_REPO_ENDPOINT'] || secrets['BIFROST_PROMPT_REPO_ENDPOINT'] }}
+          BIFROST_ENDPOINT: ${{ inputs.endpoint }}
           AI_API_KEY: ${{ vars['BIFROST_PROMPT_REPO_API_KEY'] || secrets['BIFROST_PROMPT_REPO_API_KEY'] || '' }}
         run: |
           set -euo pipefail
 
           if [ -z "${BIFROST_ENDPOINT:-}" ]; then
-            echo "Missing endpoint. Provide workflow input 'endpoint' or set Actions Variable/Secret BIFROST_PROMPT_REPO_ENDPOINT."
-            echo "Note: Codespaces secrets are not available to GitHub Actions workflows."
+            echo "Missing endpoint input. Provide 'endpoint' when manually triggering the workflow."
             exit 1
           fi
 
