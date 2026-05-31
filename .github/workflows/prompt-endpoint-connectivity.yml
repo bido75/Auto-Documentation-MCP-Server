@@ -2,6 +2,11 @@ name: Prompt Endpoint Connectivity Check
 
 on:
   workflow_dispatch:
+    inputs:
+      endpoint:
+        description: "Optional override endpoint (e.g. https://bifrost.giscop.com or http://host:8080)"
+        required: false
+        type: string
 
 jobs:
   connectivity-check:
@@ -12,13 +17,20 @@ jobs:
     steps:
       - name: Resolve endpoint and run safe connectivity probe
         env:
-          BIFROST_ENDPOINT: ${{ vars['BIFROST_PROMPT_REPO_ENDPOINT'] || secrets['BIFROST_PROMPT_REPO_ENDPOINT'] }}
+          BIFROST_ENDPOINT: ${{ inputs.endpoint || vars['BIFROST_PROMPT_REPO_ENDPOINT'] || secrets['BIFROST_PROMPT_REPO_ENDPOINT'] }}
           AI_API_KEY: ${{ vars['BIFROST_PROMPT_REPO_API_KEY'] || secrets['BIFROST_PROMPT_REPO_API_KEY'] || '' }}
         run: |
           set -euo pipefail
 
           if [ -z "${BIFROST_ENDPOINT:-}" ]; then
-            echo "Missing BIFROST_PROMPT_REPO_ENDPOINT (Actions Variable or Secret)."
+            echo "Missing endpoint. Provide workflow input 'endpoint' or set Actions Variable/Secret BIFROST_PROMPT_REPO_ENDPOINT."
+            echo "Note: Codespaces secrets are not available to GitHub Actions workflows."
+            exit 1
+          fi
+
+          if [[ "${BIFROST_ENDPOINT}" == http://localhost* ]] || [[ "${BIFROST_ENDPOINT}" == http://127.0.0.1* ]]; then
+            echo "Endpoint '${BIFROST_ENDPOINT}' points to localhost. GitHub-hosted runners cannot reach your local machine."
+            echo "Use a public/tunneled endpoint (for example your cloudflared hostname) or run on a self-hosted runner."
             exit 1
           fi
 
@@ -26,24 +38,32 @@ jobs:
           echo "Probing endpoint: ${TARGET}"
           if [ -n "${AI_API_KEY:-}" ]; then
             echo "Auth header: enabled"
-            AUTH_ARG="-H Authorization: Bearer ${AI_API_KEY}"
           else
             echo "Auth header: disabled"
-            AUTH_ARG=""
           fi
 
           # Capture only safe diagnostics (no response body logging).
-          if [ -n "$AUTH_ARG" ]; then
+          set +e
+          if [ -n "${AI_API_KEY:-}" ]; then
             METRICS=$(curl -sS -o /tmp/prompt_probe_body.json \
               -w "http_code=%{http_code}\nremote_ip=%{remote_ip}\ntime_connect=%{time_connect}\ntime_total=%{time_total}\nsize_download=%{size_download}\n" \
               --connect-timeout 10 --max-time 25 \
               -H "Authorization: Bearer ${AI_API_KEY}" \
               "$TARGET")
+            CURL_EXIT=$?
           else
             METRICS=$(curl -sS -o /tmp/prompt_probe_body.json \
               -w "http_code=%{http_code}\nremote_ip=%{remote_ip}\ntime_connect=%{time_connect}\ntime_total=%{time_total}\nsize_download=%{size_download}\n" \
               --connect-timeout 10 --max-time 25 \
               "$TARGET")
+            CURL_EXIT=$?
+          fi
+          set -e
+
+          if [ "$CURL_EXIT" -ne 0 ]; then
+            echo "curl failed with exit code ${CURL_EXIT}. This usually indicates DNS, routing, TLS, or firewall/network reachability issues from the GitHub runner."
+            echo "Checked endpoint: ${TARGET}"
+            exit 1
           fi
 
           echo "$METRICS"

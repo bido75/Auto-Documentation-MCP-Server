@@ -81,6 +81,15 @@ Important: GitHub Actions reads from repository Settings -> Secrets and variable
 
 If drift is detected, CI fails and prints which prompt would require a new version.
 
+### One-Click Connectivity Check
+
+Use manual workflow `.github/workflows/prompt-endpoint-connectivity.yml` to validate Actions networking and auth to your configured prompt endpoint.
+
+- Trigger from GitHub Actions: `Prompt Endpoint Connectivity Check`.
+- Optional workflow input: `endpoint` (overrides repo variable/secret for a one-off run).
+- Prints safe diagnostics only (HTTP code, connect/total time, remote IP, response size).
+- If endpoint is missing or unreachable from GitHub-hosted runners, the workflow fails with explicit guidance.
+
 ## Cloud Failover Smoke Test
 
 Use the one-command smoke test to force local model failure and verify OpenRouter fallback is actually used.
