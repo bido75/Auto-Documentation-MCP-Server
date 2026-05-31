@@ -1,0 +1,59 @@
+name: Prompt Endpoint Connectivity Check
+
+on:
+  workflow_dispatch:
+
+jobs:
+  connectivity-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Resolve endpoint and run safe connectivity probe
+        env:
+          BIFROST_ENDPOINT: ${{ vars['BIFROST_PROMPT_REPO_ENDPOINT'] || secrets['BIFROST_PROMPT_REPO_ENDPOINT'] }}
+          AI_API_KEY: ${{ vars['BIFROST_PROMPT_REPO_API_KEY'] || secrets['BIFROST_PROMPT_REPO_API_KEY'] || '' }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${BIFROST_ENDPOINT:-}" ]; then
+            echo "Missing BIFROST_PROMPT_REPO_ENDPOINT (Actions Variable or Secret)."
+            exit 1
+          fi
+
+          TARGET="${BIFROST_ENDPOINT%/}/api/prompt-repo/prompts"
+          echo "Probing endpoint: ${TARGET}"
+          if [ -n "${AI_API_KEY:-}" ]; then
+            echo "Auth header: enabled"
+            AUTH_ARG="-H Authorization: Bearer ${AI_API_KEY}"
+          else
+            echo "Auth header: disabled"
+            AUTH_ARG=""
+          fi
+
+          # Capture only safe diagnostics (no response body logging).
+          if [ -n "$AUTH_ARG" ]; then
+            METRICS=$(curl -sS -o /tmp/prompt_probe_body.json \
+              -w "http_code=%{http_code}\nremote_ip=%{remote_ip}\ntime_connect=%{time_connect}\ntime_total=%{time_total}\nsize_download=%{size_download}\n" \
+              --connect-timeout 10 --max-time 25 \
+              -H "Authorization: Bearer ${AI_API_KEY}" \
+              "$TARGET")
+          else
+            METRICS=$(curl -sS -o /tmp/prompt_probe_body.json \
+              -w "http_code=%{http_code}\nremote_ip=%{remote_ip}\ntime_connect=%{time_connect}\ntime_total=%{time_total}\nsize_download=%{size_download}\n" \
+              --connect-timeout 10 --max-time 25 \
+              "$TARGET")
+          fi
+
+          echo "$METRICS"
+          HTTP_CODE=$(echo "$METRICS" | awk -F= '/^http_code=/{print $2}')
+          BYTES=$(wc -c < /tmp/prompt_probe_body.json | tr -d ' ')
+          echo "response_bytes=${BYTES}"
+
+          if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+            echo "Connectivity check passed."
+          else
+            echo "Connectivity check failed with HTTP ${HTTP_CODE}."
+            exit 1
+          fi
