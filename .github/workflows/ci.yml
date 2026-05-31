@@ -52,7 +52,9 @@ jobs:
             SCHEME="$(printf '%s' "$BIFROST_ENDPOINT" | sed -E 's#^(https?)://.*#\1#')"
             REST="$(printf '%s' "$BIFROST_ENDPOINT" | sed -E 's#^https?://##')"
             REST="${REST#*@}"
-            export BIFROST_ENDPOINT="${SCHEME}://${BIFROST_BASIC_AUTH_USERNAME}:${BIFROST_BASIC_AUTH_PASSWORD}@${REST}"
+            ENCODED_BASIC_USER="$(node -p "encodeURIComponent(process.argv[1])" "${BIFROST_BASIC_AUTH_USERNAME}")"
+            ENCODED_BASIC_PASS="$(node -p "encodeURIComponent(process.argv[1])" "${BIFROST_BASIC_AUTH_PASSWORD}")"
+            export BIFROST_ENDPOINT="${SCHEME}://${ENCODED_BASIC_USER}:${ENCODED_BASIC_PASS}@${REST}"
             echo "Prompt drift guard auth mode: basic"
           elif [ -n "${AI_API_KEY:-}" ]; then
             echo "Prompt drift guard auth mode: bearer"
