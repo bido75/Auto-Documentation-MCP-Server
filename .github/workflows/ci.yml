@@ -34,8 +34,8 @@ jobs:
 
       - name: Prompt drift guard (dry run)
         env:
-          BIFROST_ENDPOINT: ${{ secrets['BIFROST_PROMPT_REPO_ENDPOINT'] }}
-          AI_API_KEY: ${{ secrets['BIFROST_PROMPT_REPO_API_KEY'] }}
+          BIFROST_ENDPOINT: ${{ vars['BIFROST_PROMPT_REPO_ENDPOINT'] || secrets['BIFROST_PROMPT_REPO_ENDPOINT'] }}
+          AI_API_KEY: ${{ vars['BIFROST_PROMPT_REPO_API_KEY'] || secrets['BIFROST_PROMPT_REPO_API_KEY'] || 'ollama' }}
         run: |
           if [ -z "$BIFROST_ENDPOINT" ]; then
             echo "Missing secret BIFROST_PROMPT_REPO_ENDPOINT for prompt drift guard."

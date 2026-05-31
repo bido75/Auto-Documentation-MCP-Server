@@ -70,6 +70,15 @@ Set these repository secrets so CI can query your prompt repository:
 - `BIFROST_PROMPT_REPO_ENDPOINT` (example: `https://bifrost.your-domain.com`)
 - `BIFROST_PROMPT_REPO_API_KEY` (optional if endpoint is public)
 
+Self-hosted note:
+
+- There is no separate "prompt repo API key" in many self-hosted Bifrost setups.
+- Use the same gateway API key your runtime uses for `AI_API_KEY` (commonly `ollama` in this project), or leave it unset if your endpoint does not require auth.
+- CI accepts either Actions Variables or Actions Secrets for `BIFROST_PROMPT_REPO_ENDPOINT` and `BIFROST_PROMPT_REPO_API_KEY`.
+- If `BIFROST_PROMPT_REPO_API_KEY` is not provided, CI falls back to `ollama`.
+
+Important: GitHub Actions reads from repository Settings -> Secrets and variables -> Actions, not Codespaces secrets.
+
 If drift is detected, CI fails and prints which prompt would require a new version.
 
 ## Cloud Failover Smoke Test
