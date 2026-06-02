@@ -1,0 +1,181 @@
+services:
+  postgres:
+    profiles: ["self-hosted"]
+    image: postgres:16-alpine
+    container_name: bifrost-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bifrost
+      POSTGRES_USER: bifrost
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - ai-mesh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bifrost -d bifrost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      OLLAMA_KEEP_ALIVE: 24h
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-2}
+      OLLAMA_MAX_QUEUE: ${OLLAMA_MAX_QUEUE:-64}
+    # Uncomment if you have an NVIDIA GPU:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+    networks:
+      - ai-mesh
+
+  notion-auto-doc:
+    profiles: ["self-hosted"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: notion-auto-doc
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NOTION_TOKEN: ${NOTION_TOKEN:-}
+      AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE: ${AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE:-true}
+      AUTO_DOC_HTTP_HOST: 0.0.0.0
+      AUTO_DOC_HTTP_PORT: 3000
+      AI_PROVIDER_TYPE: ${AI_PROVIDER_TYPE:-bifrost}
+      AI_ENDPOINT: ${AI_ENDPOINT:-http://bifrost-gateway:8080/v1}
+      AI_API_KEY: ${AI_API_KEY:-ollama}
+      BIFROST_ENDPOINT: ${BIFROST_ENDPOINT:-http://bifrost-gateway:8080}
+      AI_MODEL_NAME: ${AI_MODEL_NAME:-openai/llama3.2:3b-instruct-q4_K_M}
+      AI_FALLBACK_MODEL_1: ${AI_FALLBACK_MODEL_1:-openai/qwen2.5:3b-instruct-q4_K_M}
+      AI_FALLBACK_MODEL_2: ${AI_FALLBACK_MODEL_2:-openai/gemma2:2b-instruct-q4_K_M}
+      AI_FALLBACK_MODEL_3: ${AI_FALLBACK_MODEL_3:-openai/llama3.1:8b-instruct-q4_K_M}
+      AI_CLOUD_FALLBACK_MODEL: ${AI_CLOUD_FALLBACK_MODEL:-}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_ENDPOINT: ${OPENROUTER_ENDPOINT:-https://openrouter.ai/api/v1}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,https://verdent.ai}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      AI_SESSION_WEBHOOK_SECRET: ${AI_SESSION_WEBHOOK_SECRET:-}
+      STATE_ENCRYPTION_KEY: ${STATE_ENCRYPTION_KEY:-change-this-for-self-hosted}
+    command: ["node", "build/src/cli/index.js", "bridge"]
+    networks:
+      - ai-mesh
+    depends_on:
+      - ollama
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  bifrost-gateway:
+    profiles: ["self-hosted"]
+    image: maximhq/bifrost:v1.5.6
+    container_name: bifrost-gateway
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./bifrost-data:/app/data
+      - ./bifrost-config.json:/app/config.json:ro
+      - ./bifrost-config.json:/app/data/config.json:ro
+    environment:
+      NODE_ENV: production
+      BIFROST_PORT: 8080
+      DATABASE_URL: postgresql://bifrost:${POSTGRES_PASSWORD:-}@postgres:5432/bifrost
+      BIFROST_PUBLIC_URL: https://bifrost.giscop.com
+      BIFROST_BASE_URL: https://bifrost.giscop.com
+      TRUST_PROXY: true
+      BIFROST_TRUST_PROXY: 1
+      SESSION_COOKIE_DOMAIN: bifrost.giscop.com
+      SESSION_COOKIE_SECURE: true
+      SESSION_COOKIE_SAME_SITE: lax
+      NOTION_TOKEN: ${NOTION_TOKEN:-}
+      BIFROST_EXTERNAL_URL: ${BIFROST_EXTERNAL_URL:-}
+    networks:
+      - ai-mesh
+    depends_on:
+      postgres:
+        condition: service_healthy
+      notion-auto-doc:
+        condition: service_healthy
+
+  cloudflared:
+    profiles: ["self-hosted"]
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: unless-stopped
+    command: tunnel --protocol http2 --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared:/etc/cloudflared
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      CLOUDFLARE_TUNNEL_ID: ${CLOUDFLARE_TUNNEL_ID:-}
+      CLOUDFLARE_BIFROST_HOSTNAME: ${CLOUDFLARE_BIFROST_HOSTNAME:-}
+      CLOUDFLARE_MCP_HOSTNAME: ${CLOUDFLARE_MCP_HOSTNAME:-}
+    networks:
+      - ai-mesh
+    depends_on:
+      - bifrost-gateway
+
+  tailscale:
+    profiles: ["self-hosted"]
+    image: tailscale/tailscale:latest
+    container_name: tailscale
+    restart: unless-stopped
+    hostname: auto-doc-mcp-server
+    environment:
+      TS_AUTHKEY: ${TAILSCALE_AUTH_KEY:-}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_ROUTES: 172.20.0.0/16
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    networks:
+      - ai-mesh
+
+  nginx:
+    profiles: ["self-hosted"]
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - ai-mesh
+    depends_on:
+      - bifrost-gateway
+      - notion-auto-doc
+
+volumes:
+  postgres-data:
+  ollama-models:
+  tailscale-state:
+
+networks:
+  ai-mesh:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
