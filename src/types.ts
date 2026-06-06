@@ -49,4 +49,6 @@ export interface AnalyzeDocumentationCandidateResult extends DocumentationCandid
   fallbackStatus: AnalyzeFallbackStatus;
   fallbackEntryId: string | null;
   fallbackReasonCode: AnalyzeFallbackReasonCode;
+  dedupeDecision?: string;
+  matchedExistingFeatureKey?: string | null;
 }

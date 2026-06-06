@@ -236,6 +236,20 @@ export function registerPackageManualTool(server: McpServer) {
             (input.audience === "admin" && (entry.audience === "Admin" || entry.audience === "Both"))),
       ).length;
         const excludedCount = sourceEntries.length - includedCount;
+        const excludedReasons = sourceEntries
+          .filter(
+            (entry) =>
+              !(entry.status === "Published" || entry.status === "Approved") ||
+              (input.audience === "user" && !(entry.audience === "User" || entry.audience === "Both")) ||
+              (input.audience === "admin" && !(entry.audience === "Admin" || entry.audience === "Both")),
+          )
+          .map((entry) => ({
+            entryTitle: entry.title,
+            reason:
+              !(entry.status === "Published" || entry.status === "Approved")
+                ? `status=${entry.status}`
+                : `audience_mismatch(${entry.audience})`,
+          }));
 
         const userEntriesCount = sourceEntries.filter(
         (entry) =>
@@ -354,6 +368,7 @@ export function registerPackageManualTool(server: McpServer) {
                   releasePageId,
                   includedEntryCount: includedCount,
                   excludedEntryCount: excludedCount,
+                  excludedReasons,
                   output,
                 },
                 null,

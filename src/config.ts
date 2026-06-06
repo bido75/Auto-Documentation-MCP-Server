@@ -16,8 +16,7 @@ export interface OptionalRuntimeConfig {
   corsAllowedOrigins: string[];
   stateEncryptionKey: string;
   bifrostEndpoint: string;
-  defaultPublishingMode: PublishingMode;
-  defaultAutoPublishThreshold: number;
+  bifrostVirtualKey: string;
   provider: {
     type: string;
     endpoint: string;
@@ -31,6 +30,7 @@ export interface OptionalRuntimeConfig {
     timeoutMs: number;
     maxRetries: number;
     fallbackToDeterm: boolean;
+    bifrostVk: string;
   };
   embedding: {
     provider: string;
@@ -62,6 +62,8 @@ export interface OptionalRuntimeConfig {
     repoPath?: string;
     mode: string;
   };
+  defaultPublishingMode: PublishingMode;
+  defaultAutoPublishThreshold: number;
 }
 
 function envString(key: string, fallback: string, env: NodeJS.ProcessEnv): string {
@@ -88,6 +90,7 @@ function envBool(key: string, fallback: boolean, env: NodeJS.ProcessEnv): boolea
 }
 
 export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConfig {
+  const bifrostVk = env.BIFROST_VIRTUAL_KEY?.trim() || "";
   return {
     notionToken: env.NOTION_TOKEN?.trim() || undefined,
     corsAllowedOrigins: envString("CORS_ALLOWED_ORIGINS", "http://localhost", env)
@@ -96,6 +99,7 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
       .filter(Boolean),
     stateEncryptionKey: envString("STATE_ENCRYPTION_KEY", "auto-doc-mcp-default-dev-key-change-me", env),
     bifrostEndpoint: envString("BIFROST_ENDPOINT", "http://bifrost-gateway:8080", env),
+    bifrostVirtualKey: bifrostVk,
     provider: {
       type: envString("AI_PROVIDER_TYPE", "bifrost", env),
       endpoint: envString("AI_ENDPOINT", "http://bifrost-gateway:8080/v1", env),
@@ -111,6 +115,7 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
       timeoutMs: envInt("AI_TIMEOUT_MS", 45000, env),
       maxRetries: envInt("AI_MAX_RETRIES", 2, env),
       fallbackToDeterm: envBool("AI_FALLBACK_TO_DETERMINISTIC", true, env),
+      bifrostVk,
     },
     embedding: {
       provider: envString("EMBEDDING_PROVIDER", "none", env),

@@ -1,0 +1,17 @@
+ingress:
+  - hostname: mcp.giscop.com
+    service: http://notion-auto-doc:3000
+    originRequest:
+      connectTimeout: 30s
+      keepAliveTimeout: 3600s
+      keepAliveConnections: 100
+      noTLSVerify: false
+  - hostname: bifrost.giscop.com
+    service: http://nginx-proxy:80
+    originRequest:
+      connectTimeout: 30s
+      keepAliveTimeout: 90s
+      keepAliveConnections: 100
+      http2Origin: false
+      noTLSVerify: false
+  - service: http_status:404

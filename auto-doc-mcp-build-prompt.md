@@ -72,7 +72,7 @@ npx playwright install chromium   # optional, for screenshot capture
   "scripts": {
     "dev": "tsx src/index.ts",
     "build": "tsc",
-    "start": "node build/index.js"
+    "start": "node build/src/index.js"
   }
 }
 ```
@@ -447,7 +447,7 @@ After building, the server is registered in the IDE like this:
   "mcpServers": {
     "auto-doc-server": {
       "command": "node",
-      "args": ["/absolute/path/to/build/index.js"],
+      "args": ["/absolute/path/to/build/src/index.js"],
       "env": {
         "NOTION_TOKEN": "secret_yourNotionIntegrationTokenHere"
       }

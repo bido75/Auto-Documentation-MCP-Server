@@ -59,8 +59,16 @@ describe("StateStore", () => {
       eventSnapshots: {},
     });
 
-    const content = JSON.parse(await readFile(filePath, "utf8")) as { schemaVersion?: number };
+    const content = JSON.parse(await readFile(filePath, "utf8")) as {
+      schemaVersion?: number;
+      checksum?: string;
+      encryptedState?: string;
+      state?: unknown;
+    };
     expect(content.schemaVersion).toBe(CURRENT_STATE_SCHEMA_VERSION);
+    expect(typeof content.checksum).toBe("string");
+    expect(typeof content.encryptedState).toBe("string");
+    expect(content.state).toBeUndefined();
   });
 
   it("migrates legacy unversioned state and backfills eventSnapshots", async () => {
@@ -103,9 +111,11 @@ describe("StateStore", () => {
 
     const persisted = JSON.parse(await readFile(filePath, "utf8")) as {
       schemaVersion?: number;
-      projects?: Record<string, { eventSnapshots?: Record<string, unknown> }>;
+      checksum?: string;
+      encryptedState?: string;
     };
     expect(persisted.schemaVersion).toBe(CURRENT_STATE_SCHEMA_VERSION);
-    expect(persisted.projects?.proj_legacy?.eventSnapshots).toEqual({});
+    expect(typeof persisted.checksum).toBe("string");
+    expect(typeof persisted.encryptedState).toBe("string");
   });
 });

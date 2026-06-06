@@ -3,12 +3,13 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "allowJs": true,
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "build",
-    "rootDir": "src"
+    "rootDir": "."
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "build", "tests"]

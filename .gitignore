@@ -24,3 +24,15 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 .vscode/*.code-workspace
+
+# Local generated artifacts and diagnostics
+.tmp_*
+.vitest-report*.json
+.vitest-single.json
+.compose.rendered.yml
+.audit_expected_files.txt
+job-*-logs.zip
+Microsoft/
+bifrost-assets/
+bifrost-data/
+packages/jetbrains-plugin/.gradle-bootstrap/

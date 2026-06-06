@@ -58,5 +58,5 @@ export function logToolEvent(event: ToolLogEvent): void {
     return;
   }
 
-  console.log(line);
+  console.error(line);
 }

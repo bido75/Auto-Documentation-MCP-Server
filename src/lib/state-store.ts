@@ -1,7 +1,9 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { getOptionalRuntimeConfig } from "../config.js";
 
-export const CURRENT_STATE_SCHEMA_VERSION = 2;
+export const CURRENT_STATE_SCHEMA_VERSION = 3;
 
 export interface ProjectDatabases {
   projectsDatabaseId: string;
@@ -9,6 +11,27 @@ export interface ProjectDatabases {
   manualEntriesDatabaseId: string;
   evidenceEventsDatabaseId: string;
   releasesDatabaseId: string;
+}
+
+export interface ReleaseAutomationRun {
+  releaseTag: string;
+  releaseVersion: string;
+  status: "success" | "failure";
+  attemptedAt: string;
+  errorMessage?: string;
+}
+
+export interface RunnerFailureTriageMetadata {
+  acknowledgedAt?: string;
+  acknowledgedBy?: string;
+  cooldownUntil?: string;
+  note?: string;
+}
+
+export interface RunnerFailureTriageHistoryEntry {
+  changedAt: string;
+  action: "set" | "clear";
+  metadata: RunnerFailureTriageMetadata | null;
 }
 
 export interface ProjectState {
@@ -23,6 +46,10 @@ export interface ProjectState {
   featuresByKey: Record<string, string>;
   eventsByExternalId: Record<string, string>;
   eventSnapshots: Record<string, EventSnapshot>;
+  lastSeenReleaseTag?: string | null;
+  releaseAutomationRuns?: ReleaseAutomationRun[];
+  runnerFailureTriage?: RunnerFailureTriageMetadata;
+  runnerFailureTriageHistory?: RunnerFailureTriageHistoryEntry[];
 }
 
 export interface EventSnapshot {
@@ -43,6 +70,13 @@ interface StateShape {
 
 const DEFAULT_STATE: StateShape = { schemaVersion: CURRENT_STATE_SCHEMA_VERSION, projects: {} };
 
+interface StateEnvelope {
+  schemaVersion: number;
+  checksum: string;
+  encryptedState?: string;
+  state?: StateShape;
+}
+
 interface LegacyProjectState {
   projectId?: string;
   projectName?: string;
@@ -55,11 +89,49 @@ interface LegacyProjectState {
   featuresByKey?: Record<string, string>;
   eventsByExternalId?: Record<string, string>;
   eventSnapshots?: Record<string, EventSnapshot>;
+  lastSeenReleaseTag?: string | null;
+  releaseAutomationRuns?: ReleaseAutomationRun[];
+  runnerFailureTriage?: RunnerFailureTriageMetadata;
+  runnerFailureTriageHistory?: RunnerFailureTriageHistoryEntry[];
 }
 
 interface LegacyStateShape {
   schemaVersion?: number;
   projects?: Record<string, LegacyProjectState>;
+}
+
+function computeChecksum(state: StateShape): string {
+  return createHash("sha256").update(JSON.stringify(state)).digest("hex");
+}
+
+function encryptState(data: string, key: string): string {
+  const iv = randomBytes(16);
+  const keyBytes = scryptSync(key, "autodoc-state-salt", 32);
+  const cipher = createCipheriv("aes-256-gcm", keyBytes, iv);
+  const encrypted = Buffer.concat([cipher.update(data, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return JSON.stringify({
+    iv: iv.toString("hex"),
+    tag: tag.toString("hex"),
+    data: encrypted.toString("hex"),
+  });
+}
+
+function decryptState(payload: string, key: string): string {
+  const parsed = JSON.parse(payload) as { iv: string; tag: string; data: string };
+  const keyBytes = scryptSync(key, "autodoc-state-salt", 32);
+  const decipher = createDecipheriv("aes-256-gcm", keyBytes, Buffer.from(parsed.iv, "hex"));
+  decipher.setAuthTag(Buffer.from(parsed.tag, "hex"));
+  return decipher.update(Buffer.from(parsed.data, "hex"), undefined, "utf8") + decipher.final("utf8");
+}
+
+function isStateEnvelope(value: unknown): value is StateEnvelope {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "checksum" in value &&
+    ("encryptedState" in value || "state" in value)
+  );
 }
 
 function normalizeProject(projectId: string, project: LegacyProjectState): ProjectState {
@@ -81,6 +153,10 @@ function normalizeProject(projectId: string, project: LegacyProjectState): Proje
     featuresByKey: project.featuresByKey ?? {},
     eventsByExternalId: project.eventsByExternalId ?? {},
     eventSnapshots: project.eventSnapshots ?? {},
+    lastSeenReleaseTag: project.lastSeenReleaseTag ?? null,
+    releaseAutomationRuns: project.releaseAutomationRuns ?? [],
+    runnerFailureTriage: project.runnerFailureTriage ?? {},
+    runnerFailureTriageHistory: project.runnerFailureTriageHistory ?? [],
   };
 }
 
@@ -108,9 +184,29 @@ export class StateStore {
   async load(): Promise<StateShape> {
     try {
       const raw = await readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as LegacyStateShape;
-      const { migrated, changed } = migrateState(parsed);
+      const parsed = JSON.parse(raw) as LegacyStateShape | StateEnvelope;
+      let source: LegacyStateShape;
 
+      if (isStateEnvelope(parsed)) {
+        const stateData = parsed.encryptedState
+          ? (JSON.parse(decryptState(parsed.encryptedState, getOptionalRuntimeConfig().stateEncryptionKey)) as LegacyStateShape)
+          : (parsed.state as LegacyStateShape | undefined);
+
+        if (!stateData) {
+          throw new Error("State file is missing persisted state data.");
+        }
+
+        const checksum = computeChecksum(stateData as StateShape);
+        if (checksum !== parsed.checksum) {
+          throw new Error("State file checksum mismatch. The local state file may be corrupted.");
+        }
+
+        source = stateData;
+      } else {
+        source = parsed;
+      }
+
+      const { migrated, changed } = migrateState(source);
       if (changed) {
         await this.save(migrated);
       }
@@ -128,7 +224,20 @@ export class StateStore {
 
   private async save(state: StateShape): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, JSON.stringify(state, null, 2), "utf8");
+    const encryptedState = encryptState(JSON.stringify(state), getOptionalRuntimeConfig().stateEncryptionKey);
+    const envelope: StateEnvelope = {
+      schemaVersion: CURRENT_STATE_SCHEMA_VERSION,
+      checksum: computeChecksum(state),
+      encryptedState,
+    };
+    const tempFilePath = `${this.filePath}.tmp`;
+    await writeFile(tempFilePath, JSON.stringify(envelope, null, 2), "utf8");
+    try {
+      await rename(tempFilePath, this.filePath);
+    } catch {
+      await unlink(this.filePath).catch(() => undefined);
+      await rename(tempFilePath, this.filePath);
+    }
   }
 
   async upsertProject(project: ProjectState): Promise<ProjectState> {
@@ -189,6 +298,119 @@ export class StateStore {
   async getEventSnapshot(projectId: string, externalEventId: string): Promise<EventSnapshot | null> {
     const state = await this.load();
     return state.projects[projectId]?.eventSnapshots[externalEventId] ?? null;
+  }
+
+  async getLastSeenReleaseTag(projectId: string, _repoPath: string): Promise<string | null> {
+    const state = await this.load();
+    return state.projects[projectId]?.lastSeenReleaseTag ?? null;
+  }
+
+  async setLastSeenReleaseTag(projectId: string, _repoPath: string, releaseTag: string): Promise<void> {
+    const state = await this.load();
+    const project = state.projects[projectId];
+    if (!project) {
+      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+    }
+
+    project.lastSeenReleaseTag = releaseTag;
+    await this.save(state);
+  }
+
+  async listReleaseAutomationRuns(projectId: string, _repoPath: string): Promise<ReleaseAutomationRun[]> {
+    const state = await this.load();
+    return state.projects[projectId]?.releaseAutomationRuns ?? [];
+  }
+
+  async setReleaseAutomationRun(input: {
+    projectId: string;
+    repoPath: string;
+    releaseTag: string;
+    releaseVersion: string;
+    status: "success" | "failure";
+    attemptedAt: string;
+    errorMessage?: string;
+  }): Promise<void> {
+    const state = await this.load();
+    const project = state.projects[input.projectId];
+    if (!project) {
+      throw new Error(`Unknown projectId '${input.projectId}'. Run initialize_project_manual first.`);
+    }
+
+    project.releaseAutomationRuns = project.releaseAutomationRuns ?? [];
+    project.releaseAutomationRuns.unshift({
+      releaseTag: input.releaseTag,
+      releaseVersion: input.releaseVersion,
+      status: input.status,
+      attemptedAt: input.attemptedAt,
+      errorMessage: input.errorMessage,
+    });
+    await this.save(state);
+  }
+
+  async getReleaseAutomationRun(projectId: string, _repoPath: string, releaseTag: string): Promise<ReleaseAutomationRun | null> {
+    const state = await this.load();
+    const runs = state.projects[projectId]?.releaseAutomationRuns ?? [];
+    return runs.find((run) => run.releaseTag === releaseTag) ?? null;
+  }
+
+  async getRunnerFailureTriageMetadata(projectId: string, _repoPath: string): Promise<RunnerFailureTriageMetadata | null> {
+    const state = await this.load();
+    return state.projects[projectId]?.runnerFailureTriage ?? null;
+  }
+
+  async setRunnerFailureTriageMetadata(
+    projectId: string,
+    repoPathOrMetadata: string | RunnerFailureTriageMetadata,
+    maybeMetadata?: RunnerFailureTriageMetadata,
+  ): Promise<void> {
+    const state = await this.load();
+    const project = state.projects[projectId];
+    if (!project) {
+      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+    }
+
+    const metadata = typeof repoPathOrMetadata === "string" ? maybeMetadata : repoPathOrMetadata;
+    if (!metadata) {
+      throw new Error("Runner failure triage metadata is required.");
+    }
+
+    project.runnerFailureTriage = metadata;
+    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory ?? [];
+    project.runnerFailureTriageHistory.unshift({
+      changedAt: new Date().toISOString(),
+      action: "set",
+      metadata,
+    });
+    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory.slice(0, 100);
+    await this.save(state);
+  }
+
+  async clearRunnerFailureTriageMetadata(projectId: string, _repoPath: string): Promise<void> {
+    const state = await this.load();
+    const project = state.projects[projectId];
+    if (!project) {
+      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+    }
+
+    project.runnerFailureTriage = {};
+    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory ?? [];
+    project.runnerFailureTriageHistory.unshift({
+      changedAt: new Date().toISOString(),
+      action: "clear",
+      metadata: null,
+    });
+    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory.slice(0, 100);
+    await this.save(state);
+  }
+
+  async listRunnerFailureTriageHistory(
+    projectId: string,
+    _repoPath: string,
+    limit = 10,
+  ): Promise<RunnerFailureTriageHistoryEntry[]> {
+    const state = await this.load();
+    const history = state.projects[projectId]?.runnerFailureTriageHistory ?? [];
+    return history.slice(0, Math.max(1, limit));
   }
 }
 

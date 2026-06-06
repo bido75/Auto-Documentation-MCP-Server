@@ -1,0 +1,56 @@
+{
+  "name": "auto-doc-mcp-vscode-extension",
+  "displayName": "Auto-Doc MCP",
+  "description": "Accessible login/logout UI for Auto-Doc MCP with secure token storage.",
+  "version": "0.1.0",
+  "publisher": "bido75",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other", "Machine Learning"],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "autoDocMcp.openAuth",
+        "title": "Auto-Doc: Open Login Page",
+        "icon": "$(account)"
+      },
+      {
+        "command": "autoDocMcp.updateToken",
+        "title": "Auto-Doc: Update Login Token",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "autoDocMcp.login",
+        "title": "Auto-Doc: Login",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "autoDocMcp.logout",
+        "title": "Auto-Doc: Logout",
+        "icon": "$(sign-out)"
+      }
+    ],
+    "menus": {
+      "commandPalette": [
+        { "command": "autoDocMcp.openAuth" },
+        { "command": "autoDocMcp.updateToken" },
+        { "command": "autoDocMcp.login" },
+        { "command": "autoDocMcp.logout" }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "tsc -p .",
+    "typecheck": "tsc --noEmit -p .",
+    "watch": "tsc -w -p ."
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.7.2"
+  }
+}
