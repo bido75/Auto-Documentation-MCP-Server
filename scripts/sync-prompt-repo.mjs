@@ -163,8 +163,11 @@ async function fetchJson(url, options = {}) {
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText} for ${url}\n${body}`.trim());
   }
+  if (body.trim().length === 0) {
+    throw new Error(`Received empty response body from ${url}`);
+  }
   try {
-    return body.length > 0 ? JSON.parse(body) : {};
+    return JSON.parse(body);
   } catch {
     const contentType = response.headers.get("content-type") || "unknown";
     const snippet = body.slice(0, 200);
