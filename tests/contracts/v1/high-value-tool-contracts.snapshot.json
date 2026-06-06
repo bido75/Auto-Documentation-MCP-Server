@@ -227,6 +227,7 @@
       "type": "object",
       "required": [
         "excludedEntryCount",
+        "excludedReasons",
         "format",
         "includedEntryCount",
         "output",
@@ -237,6 +238,12 @@
       "properties": {
         "excludedEntryCount": {
           "type": "number"
+        },
+        "excludedReasons": {
+          "type": "array",
+          "items": {
+            "type": "unknown"
+          }
         },
         "format": {
           "type": "string"

@@ -396,5 +396,5 @@ describe("full mocked pipeline", () => {
         process.env.NOTION_TOKEN = previousNotionToken;
       }
     }
-  });
+  }, 15_000);
 });

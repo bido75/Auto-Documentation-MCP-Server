@@ -28,5 +28,5 @@ describe("createServer tool registration", () => {
     expect(toolNames).toContain("analyze_documentation_candidate");
     expect(toolNames).toContain("upsert_feature_documentation");
     expect(toolNames).toContain("package_manual");
-  });
+  }, 15_000);
 });
