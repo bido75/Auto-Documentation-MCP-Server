@@ -159,11 +159,17 @@ function isLatestEquivalent(latest, desired) {
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
+  const body = await response.text().catch(() => "");
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
     throw new Error(`${response.status} ${response.statusText} for ${url}\n${body}`.trim());
   }
-  return response.json();
+  try {
+    return body.length > 0 ? JSON.parse(body) : {};
+  } catch {
+    const contentType = response.headers.get("content-type") || "unknown";
+    const snippet = body.slice(0, 200);
+    throw new Error(`Received non-JSON response from ${url} (content-type: ${contentType})\n${snippet}`.trim());
+  }
 }
 
 async function postJson(url, payload, headers) {
@@ -195,15 +201,40 @@ async function main() {
   const maxTokens = Number(getArgValue("--max-tokens") || DEFAULT_MAX_TOKENS);
   const dryRun = hasFlag("--dry-run");
 
-  const headers = {};
+  const authCandidates = [];
   if (basicAuthUsername.trim().length > 0 && basicAuthPassword.trim().length > 0) {
     const encoded = Buffer.from(`${basicAuthUsername.trim()}:${basicAuthPassword.trim()}`, "utf8").toString("base64");
-    headers.Authorization = `Basic ${encoded}`;
-  } else if (apiKey.trim().length > 0) {
-    headers.Authorization = `Bearer ${apiKey.trim()}`;
+    authCandidates.push({ mode: "basic", headers: { Authorization: `Basic ${encoded}` } });
+  }
+  if (apiKey.trim().length > 0) {
+    authCandidates.push({ mode: "bearer", headers: { Authorization: "Bearer " + apiKey.trim() } });
+  }
+  if (authCandidates.length === 0) {
+    authCandidates.push({ mode: "none", headers: {} });
   }
 
-  const promptsPayload = await fetchJson(`${endpoint}/api/prompt-repo/prompts`, { headers });
+  let headers = {};
+  let promptsPayload = null;
+  const authErrors = [];
+  for (const candidate of authCandidates) {
+    try {
+      promptsPayload = await fetchJson(`${endpoint}/api/prompt-repo/prompts`, { headers: candidate.headers });
+      headers = candidate.headers;
+      if (authCandidates.length > 1) {
+        console.log(`[auth] using ${candidate.mode}`);
+      }
+      break;
+    } catch (error) {
+      authErrors.push(`[${candidate.mode}] ${error instanceof Error ? error.message : String(error)}`);
+      if (authCandidates.length > 1) {
+        console.warn(`[warn] prompt repo auth mode '${candidate.mode}' failed; trying next mode`);
+      }
+    }
+  }
+
+  if (!promptsPayload) {
+    throw new Error(`Unable to fetch prompts with available auth modes:\n${authErrors.join("\n")}`);
+  }
   const prompts = Array.isArray(promptsPayload?.prompts) ? promptsPayload.prompts : [];
 
   let unchanged = 0;
