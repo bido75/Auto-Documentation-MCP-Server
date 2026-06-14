@@ -1,10 +1,57 @@
-// @ts-nocheck
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
-import { getStateStore } from "../lib/state-store.js";
+import { getStateStore, type ReleaseAutomationRun, type RunnerFailureTriageMetadata } from "../lib/state-store.js";
 import { parseContinuousRunnerTargets } from "../runner/index.js";
-function calculateFailureStreak(runs) {
+
+type RunnerTargetInput = { projectId: string; repoPath: string; releaseAutomation?: boolean };
+type RunnerHealthSummaryInput = {
+    targets?: RunnerTargetInput[];
+    limitPerTarget?: number;
+    includeTargets?: boolean;
+    highestPriorityLimit?: number;
+    staleFailureMinutesThreshold?: number;
+    escalationFailureStreakThreshold?: number;
+    traceId?: string;
+};
+type TargetStatus = "disabled" | "no_data" | "failing" | "healthy" | "pending";
+type FailureSeverity = "critical" | "high" | "medium" | "low";
+type TargetSummary = {
+    projectId: string;
+    repoPath: string;
+    releaseAutomation: boolean;
+    status: TargetStatus;
+    lastSeenReleaseTag: string | null;
+    failureStreak: number;
+    lastSuccessAt: string | null;
+    triageMetadata: RunnerFailureTriageMetadata | null;
+    latestRun: Pick<ReleaseAutomationRun, "releaseTag" | "releaseVersion" | "status" | "attemptedAt"> & { errorMessage?: string } | null;
+};
+type FailingTarget = {
+    projectId: string;
+    repoPath: string;
+    releaseTag: string | null;
+    attemptedAt: string | null;
+    failureStreak: number;
+    lastSuccessAt: string | null;
+    minutesSinceFailure: number | null;
+    stale: boolean;
+    escalated: boolean;
+    acknowledged: boolean;
+    acknowledgedAt: string | null;
+    acknowledgedBy: string | null;
+    cooldownUntil: string | null;
+    cooldownActive: boolean;
+    note: string | null;
+    priorityScore: number;
+    deprioritized: boolean;
+    severityScore: number;
+    severity: FailureSeverity;
+    errorMessage: string;
+};
+
+function calculateFailureStreak(runs: ReleaseAutomationRun[]): number {
     let streak = 0;
     for (const run of runs) {
         if (run.status !== "failure") {
@@ -14,7 +61,7 @@ function calculateFailureStreak(runs) {
     }
     return streak;
 }
-function calculateRecencyPoints(attemptedAt, nowMs) {
+function calculateRecencyPoints(attemptedAt: string, nowMs: number): number {
     const attemptedMs = Date.parse(attemptedAt);
     if (!Number.isFinite(attemptedMs)) {
         return 0;
@@ -34,28 +81,33 @@ function calculateRecencyPoints(attemptedAt, nowMs) {
     }
     return 0;
 }
-function toDateMs(value) {
+function toDateMs(value: string | null | undefined): number | null {
     if (!value) {
         return null;
     }
     const parsed = Date.parse(value);
     return Number.isFinite(parsed) ? parsed : null;
 }
-function minutesSince(attemptedAt, nowMs) {
+function minutesSince(attemptedAt: string | null, nowMs: number): number | null {
     const attemptedMs = toDateMs(attemptedAt);
     if (attemptedMs === null) {
         return null;
     }
     return Math.max(0, Math.round((nowMs - attemptedMs) / 60_000));
 }
-function findLastSuccessAt(runs) {
+function findLastSuccessAt(runs: ReleaseAutomationRun[]): string | null {
     const successRun = runs.find((run) => run.status === "success");
     return successRun?.attemptedAt ?? null;
 }
-function isStaleFailure(minutesSinceFailure, thresholdMinutes) {
+function isStaleFailure(minutesSinceFailure: number | null, thresholdMinutes: number): boolean {
     return minutesSinceFailure !== null && minutesSinceFailure >= thresholdMinutes;
 }
-function requiresEscalation(input) {
+function requiresEscalation(input: {
+    failureStreak: number;
+    severity: FailureSeverity;
+    stale: boolean;
+    escalationFailureStreakThreshold: number;
+}): boolean {
     if (input.failureStreak >= input.escalationFailureStreakThreshold) {
         return true;
     }
@@ -64,14 +116,20 @@ function requiresEscalation(input) {
     }
     return input.stale && input.severity === "high";
 }
-function isCooldownActive(cooldownUntil, nowMs) {
+function isCooldownActive(cooldownUntil: string | undefined, nowMs: number): boolean {
     if (!cooldownUntil) {
         return false;
     }
     const cooldownUntilMs = toDateMs(cooldownUntil);
     return cooldownUntilMs !== null && cooldownUntilMs > nowMs;
 }
-function calculatePriorityScore(input) {
+function calculatePriorityScore(input: {
+    severityScore: number;
+    escalated: boolean;
+    stale: boolean;
+    acknowledged: boolean;
+    cooldownActive: boolean;
+}): number {
     let score = input.severityScore;
     if (input.escalated) {
         score += 20;
@@ -87,7 +145,7 @@ function calculatePriorityScore(input) {
     }
     return Math.max(0, Math.min(score, 150));
 }
-function sortHighestPriorityTargets(a, b) {
+function sortHighestPriorityTargets(a: FailingTarget, b: FailingTarget): number {
     if (a.escalated !== b.escalated) {
         return Number(b.escalated) - Number(a.escalated);
     }
@@ -96,13 +154,13 @@ function sortHighestPriorityTargets(a, b) {
     }
     return sortFailureTargets(a, b);
 }
-function calculateFailureSeverityScore(input, nowMs) {
+function calculateFailureSeverityScore(input: { failureStreak: number; attemptedAt: string }, nowMs: number): number {
     const baseScore = 50;
     const streakPoints = Math.min(input.failureStreak * 10, 30);
     const recencyPoints = calculateRecencyPoints(input.attemptedAt, nowMs);
     return Math.min(baseScore + streakPoints + recencyPoints, 100);
 }
-function toFailureSeverity(score) {
+function toFailureSeverity(score: number): FailureSeverity {
     if (score >= 85) {
         return "critical";
     }
@@ -114,7 +172,7 @@ function toFailureSeverity(score) {
     }
     return "low";
 }
-function sortFailureTargets(a, b) {
+function sortFailureTargets(a: FailingTarget, b: FailingTarget): number {
     const aTime = a.attemptedAt ? Date.parse(a.attemptedAt) : Number.NEGATIVE_INFINITY;
     const bTime = b.attemptedAt ? Date.parse(b.attemptedAt) : Number.NEGATIVE_INFINITY;
     if (aTime !== bTime) {
@@ -122,7 +180,11 @@ function sortFailureTargets(a, b) {
     }
     return b.failureStreak - a.failureStreak;
 }
-function resolveTargetStatus(input) {
+function resolveTargetStatus(input: {
+    releaseAutomation: boolean;
+    latestRun: ReleaseAutomationRun | null;
+    lastSeenReleaseTag: string | null;
+}): TargetStatus {
     if (!input.releaseAutomation) {
         return "disabled";
     }
@@ -140,7 +202,7 @@ function resolveTargetStatus(input) {
     }
     return "pending";
 }
-function normalizeTargets(inputTargets) {
+function normalizeTargets(inputTargets?: RunnerTargetInput[]): { source: "input" | "env"; targets: RunnerTargetInput[] } {
     if (inputTargets && inputTargets.length > 0) {
         return {
             source: "input",
@@ -157,7 +219,7 @@ function normalizeTargets(inputTargets) {
         })),
     };
 }
-export function registerGetRunnerHealthSummaryTool(server) {
+export function registerGetRunnerHealthSummaryTool(server: McpServer): void {
     server.tool("get_runner_health_summary", "Aggregates compact runner release automation health across configured targets.", {
         targets: z
             .array(z.object({
@@ -172,7 +234,7 @@ export function registerGetRunnerHealthSummaryTool(server) {
         staleFailureMinutesThreshold: z.number().int().min(1).max(10080).default(120),
         escalationFailureStreakThreshold: z.number().int().min(1).max(20).default(3),
         traceId: z.string().optional(),
-    }, async ({ targets: inputTargets, limitPerTarget, includeTargets, highestPriorityLimit, staleFailureMinutesThreshold, escalationFailureStreakThreshold, traceId: incomingTraceId, }) => {
+    }, async ({ targets: inputTargets, limitPerTarget, includeTargets, highestPriorityLimit, staleFailureMinutesThreshold, escalationFailureStreakThreshold, traceId: incomingTraceId, }: RunnerHealthSummaryInput) => {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         const resolvedLimitPerTarget = limitPerTarget ?? 1;
@@ -197,12 +259,12 @@ export function registerGetRunnerHealthSummaryTool(server) {
         try {
             const store = getStateStore();
             const { source, targets } = normalizeTargets(inputTargets);
-            const uniqueTargets = new Map();
+            const uniqueTargets = new Map<string, RunnerTargetInput>();
             for (const target of targets) {
                 const key = `${target.projectId}::${target.repoPath}`;
                 uniqueTargets.set(key, target);
             }
-            const summaries = [];
+            const summaries: TargetSummary[] = [];
             const nowMs = Date.now();
             for (const target of uniqueTargets.values()) {
                 const releaseAutomation = target.releaseAutomation ?? true;

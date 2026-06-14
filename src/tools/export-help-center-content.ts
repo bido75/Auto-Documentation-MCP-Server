@@ -1,6 +1,6 @@
-// @ts-nocheck
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
@@ -8,37 +8,101 @@ import { createNotionClient } from "../lib/notion-client.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import { getStateStore } from "../lib/state-store.js";
-function getTitleValue(properties, key) {
+
+type AudienceFilter = "user" | "admin" | "both";
+type PropertyMap = Record<string, unknown>;
+type RichTextPart = { plain_text?: string };
+type NotionPage = { id: string; properties?: PropertyMap };
+type QueryInput = { database_id: string; filter?: unknown; page_size?: number; start_cursor?: string };
+type QueryResponse = { results: NotionPage[]; has_more?: boolean; next_cursor?: string | null };
+type BlockResponse = { results: Array<{ type?: string; paragraph?: { rich_text?: RichTextPart[] } }> };
+type NotionClientLike = {
+    databases: { query(input: QueryInput): Promise<QueryResponse> };
+    blocks: { children: { list(input: { block_id: string; page_size: number }): Promise<BlockResponse> } };
+};
+type PublishedEntry = {
+    id: string;
+    title: string;
+    entryType: string;
+    audience: string;
+    status: string;
+    body: string;
+};
+type HelpCenterArticle = {
+    id: string;
+    slug: string;
+    title: string;
+    audience: string;
+    entryType: string;
+    summary: string;
+    body: string;
+    sourceManualEntryId: string;
+};
+type HelpCenterSection = {
+    id: string;
+    title: string;
+    articleCount: number;
+    articles: HelpCenterArticle[];
+};
+type BuildHelpCenterInput = {
+    projectId: string;
+    audience: AudienceFilter;
+    releaseVersion?: string;
+    entries: PublishedEntry[];
+};
+type ResolveReleasePageInput = {
+    notion: NotionClientLike;
+    releasesDatabaseId: string;
+    projectPageId: string;
+    releaseVersion?: string;
+};
+type LoadPublishedEntriesInput = {
+    notion: NotionClientLike;
+    manualEntriesDatabaseId: string;
+    projectPageId: string;
+    releasePageId?: string;
+};
+type ExportHelpCenterContentInput = {
+    projectId: string;
+    audience?: AudienceFilter;
+    releaseVersion?: string;
+    outputPath?: string;
+    traceId?: string;
+};
+
+function getTitleValue(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.title?.[0]?.text?.content ?? null;
+    return typeof value === "object" && value !== null
+        ? ((value as { title?: Array<{ text?: { content?: string } }> }).title?.[0]?.text?.content ?? null)
+        : null;
 }
-function getSelectName(properties, key) {
+function getSelectName(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.select?.name ?? null;
+    return typeof value === "object" && value !== null ? ((value as { select?: { name?: string } }).select?.name ?? null) : null;
 }
-function getStatusName(properties, key) {
+function getStatusName(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.status?.name ?? null;
+    return typeof value === "object" && value !== null ? ((value as { status?: { name?: string } }).status?.name ?? null) : null;
 }
-async function queryAll(notion, input) {
-    const results = [];
-    let cursor;
+async function queryAll(notion: NotionClientLike, input: QueryInput): Promise<NotionPage[]> {
+    const results: NotionPage[] = [];
+    let cursor: string | undefined;
     do {
-        const payload = {
+        const payload: QueryInput = {
             ...input,
             ...(cursor ? { start_cursor: cursor } : {}),
         };
-        const response = (await withNotionRetry(() => notion.databases.query(payload), {
+        const response = await withNotionRetry(() => notion.databases.query(payload), {
             operationName: "databases.query",
             payload,
-        }));
+        });
         results.push(...response.results);
         cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
     } while (cursor);
     return results;
 }
-async function loadEntryBody(notion, pageId) {
-    const response = (await withNotionRetry(() => notion.blocks.children.list({
+async function loadEntryBody(notion: NotionClientLike, pageId: string): Promise<string> {
+    const response = await withNotionRetry(() => notion.blocks.children.list({
         block_id: pageId,
         page_size: 100,
     }), {
@@ -47,20 +111,20 @@ async function loadEntryBody(notion, pageId) {
             block_id: pageId,
             page_size: 100,
         },
-    }));
-    const lines = [];
+    });
+    const lines: string[] = [];
     for (const block of response.results) {
         if (block.type !== "paragraph") {
             continue;
         }
-        const text = (block.paragraph?.rich_text ?? []).map((part) => part.plain_text ?? "").join("").trim();
+        const text = (block.paragraph?.rich_text ?? []).map((part: RichTextPart) => part.plain_text ?? "").join("").trim();
         if (text) {
             lines.push(text);
         }
     }
     return lines.join("\n");
 }
-async function resolveReleasePageId(input) {
+async function resolveReleasePageId(input: ResolveReleasePageInput): Promise<string | undefined> {
     if (!input.releaseVersion) {
         return undefined;
     }
@@ -82,8 +146,8 @@ async function resolveReleasePageId(input) {
     });
     return releases[0]?.id;
 }
-async function loadPublishedEntries(input) {
-    const filters = [
+async function loadPublishedEntries(input: LoadPublishedEntriesInput): Promise<PublishedEntry[]> {
+    const filters: unknown[] = [
         {
             property: "Project",
             relation: { contains: input.projectPageId },
@@ -104,7 +168,7 @@ async function loadPublishedEntries(input) {
         filter: { and: filters },
         page_size: 100,
     });
-    const entries = [];
+    const entries: PublishedEntry[] = [];
     for (const page of pages) {
         const properties = page.properties ?? {};
         entries.push({
@@ -118,7 +182,7 @@ async function loadPublishedEntries(input) {
     }
     return entries;
 }
-function audienceIncluded(entryAudience, audience) {
+function audienceIncluded(entryAudience: string, audience: AudienceFilter): boolean {
     if (entryAudience === "Internal") {
         return false;
     }
@@ -130,7 +194,7 @@ function audienceIncluded(entryAudience, audience) {
     }
     return entryAudience === "Admin" || entryAudience === "Both";
 }
-function toSlug(input) {
+function toSlug(input: string): string {
     const normalized = input
         .toLowerCase()
         .replace(/[^a-z0-9\s-]/g, "")
@@ -138,7 +202,7 @@ function toSlug(input) {
         .replace(/\s+/g, "-");
     return normalized || "article";
 }
-function firstSentence(input) {
+function firstSentence(input: string): string {
     const trimmed = input.trim();
     if (!trimmed) {
         return "";
@@ -146,9 +210,9 @@ function firstSentence(input) {
     const sentence = trimmed.split(/[\n.!?]/)[0]?.trim() ?? "";
     return sentence.length > 180 ? `${sentence.slice(0, 177)}...` : sentence;
 }
-function buildHelpCenter(input) {
+function buildHelpCenter(input: BuildHelpCenterInput) {
     const filtered = input.entries.filter((entry) => audienceIncluded(entry.audience, input.audience));
-    const sectionsMap = new Map();
+    const sectionsMap = new Map<string, HelpCenterArticle[]>();
     for (const entry of filtered) {
         const sectionTitle = entry.entryType || "General";
         const article = {
@@ -169,7 +233,7 @@ function buildHelpCenter(input) {
             sectionsMap.set(sectionTitle, [article]);
         }
     }
-    const sections = [...sectionsMap.entries()].map(([title, articles]) => ({
+    const sections: HelpCenterSection[] = [...sectionsMap.entries()].map(([title, articles]) => ({
         id: toSlug(title),
         title,
         articleCount: articles.length,
@@ -187,14 +251,14 @@ function buildHelpCenter(input) {
         sections,
     };
 }
-export function registerExportHelpCenterContentTool(server) {
+export function registerExportHelpCenterContentTool(server: McpServer): void {
     server.tool("export_help_center_content", "Exports published manual entries as structured in-app help center JSON content.", {
         projectId: z.string(),
         audience: z.enum(["user", "admin", "both"]).default("both"),
         releaseVersion: z.string().optional(),
         outputPath: z.string().optional(),
         traceId: z.string().optional(),
-    }, async ({ projectId, audience, releaseVersion, outputPath, traceId: incomingTraceId }) => {
+    }, async ({ projectId, audience = "both", releaseVersion, outputPath, traceId: incomingTraceId }: ExportHelpCenterContentInput) => {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         logToolEvent({
@@ -211,8 +275,9 @@ export function registerExportHelpCenterContentTool(server) {
             if (!project) {
                 throw new Error("Unknown projectId. Run initialize_project_manual first.");
             }
-            const notion = createNotionClient();
-            await runProjectPreflight({ notion, project });
+            const rawNotion = createNotionClient();
+            await runProjectPreflight({ notion: rawNotion, project });
+            const notion = rawNotion as unknown as NotionClientLike;
             const projectPageId = project.projectPageId ?? project.projectId;
             const releasePageId = await resolveReleasePageId({
                 notion,

@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import cors from "cors";
-import express, { type Request, type Response } from "express";
+import express, { type Express, type Request, type Response } from "express";
 import { getOptionalRuntimeConfig } from "../config.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
@@ -21,6 +21,8 @@ const DEFAULT_PORT = 3741;
 const DEFAULT_WEBHOOK_RATE_LIMIT_PER_MINUTE = 60;
 const DEFAULT_REPLAY_TTL_MS = 10 * 60 * 1000;
 
+type HttpBridgeOptions = { port?: number; host?: string };
+
 function isTruthyEnv(value: string | undefined): boolean {
   if (!value) {
     return false;
@@ -28,6 +30,42 @@ function isTruthyEnv(value: string | undefined): boolean {
 
   const normalized = value.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function resolveHttpBridgeListenOptions(options?: HttpBridgeOptions): { port: number; host: string } {
+  const envPortRaw = process.env.AUTO_DOC_HTTP_PORT?.trim();
+  const envPort = envPortRaw ? Number.parseInt(envPortRaw, 10) : NaN;
+  const port = options?.port ?? (Number.isInteger(envPort) && envPort > 0 ? envPort : DEFAULT_PORT);
+  const host = options?.host ?? (process.env.AUTO_DOC_HTTP_HOST?.trim() || "127.0.0.1");
+  return { port, host };
+}
+
+type BridgeTokenResolution =
+  | { ok: true; notionToken: string }
+  | { ok: false; status: 401; error: string };
+
+function resolveBridgeNotionToken(req: Request, input?: { allowUnauthenticatedDiscovery?: boolean }): BridgeTokenResolution {
+  const headerToken = req.header("x-notion-token")?.trim();
+  if (headerToken && headerToken.length > 0) {
+    return { ok: true, notionToken: headerToken };
+  }
+
+  const envFallbackEnabled = isTruthyEnv(process.env.AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK);
+  const envToken = process.env.NOTION_TOKEN?.trim();
+  if (envFallbackEnabled && envToken && envToken.length > 0) {
+    return { ok: true, notionToken: envToken };
+  }
+
+  if (input?.allowUnauthenticatedDiscovery === true) {
+    return { ok: true, notionToken: "" };
+  }
+
+  return {
+    ok: false,
+    status: 401,
+    error:
+      "Missing request Notion token. Provide x-notion-token, or explicitly enable AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK=true for trusted local deployments.",
+  };
 }
 
 type ToolCallResult = {
@@ -1080,12 +1118,9 @@ export async function processAiSessionWebhookEvent(input: {
   });
 }
 
-export async function startHttpBridge(options?: { port?: number; host?: string }): Promise<void> {
+export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
   const app = express();
-  const envPortRaw = process.env.AUTO_DOC_HTTP_PORT?.trim();
-  const envPort = envPortRaw ? Number.parseInt(envPortRaw, 10) : NaN;
-  const port = options?.port ?? (Number.isInteger(envPort) && envPort > 0 ? envPort : DEFAULT_PORT);
-  const host = options?.host ?? (process.env.AUTO_DOC_HTTP_HOST?.trim() || "127.0.0.1");
+  const { port, host } = resolveHttpBridgeListenOptions(options);
   const replayProtector = createReplayProtector({
     ttlMs: Number(process.env.WEBHOOK_REPLAY_TTL_MS ?? DEFAULT_REPLAY_TTL_MS),
   });
@@ -1357,10 +1392,18 @@ export async function startHttpBridge(options?: { port?: number; host?: string }
   });
 
   app.post("/runner/trigger", async (req: Request, res: Response) => {
+    const auth = resolveBridgeNotionToken(req);
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
+      return;
+    }
+
     try {
       const requested = parseRunnerTriggerRequest(req.body);
       const triggerInput = await resolveRunnerTriggerInput(requested);
-      const result = await executeAutonomousDocumentationTrigger(triggerInput);
+      const result = await runWithRuntimeContext({ notionToken: auth.notionToken }, async () =>
+        executeAutonomousDocumentationTrigger(triggerInput),
+      );
       res.status(200).json({
         ok: true,
         triggerInput: {
@@ -1440,32 +1483,25 @@ export async function startHttpBridge(options?: { port?: number; host?: string }
   });
 
   app.get("/sse", async (req: Request, res: Response) => {
-    const headerToken = req.header("x-notion-token")?.trim();
-    const envToken = process.env.NOTION_TOKEN?.trim();
-    const sessionToken = headerToken && headerToken.length > 0 ? headerToken : envToken;
-    const allowUnauthenticatedSse = isTruthyEnv(process.env.AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE);
-
-    if ((!sessionToken || sessionToken.length === 0) && !allowUnauthenticatedSse) {
-      res.status(401).json({
-        ok: false,
-        error: "Missing Notion token. Provide x-notion-token, set NOTION_TOKEN, or enable AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE=true for local tool discovery.",
-      });
+    const auth = resolveBridgeNotionToken(req, {
+      allowUnauthenticatedDiscovery: isTruthyEnv(process.env.AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE),
+    });
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
       return;
     }
-
-    const resolvedSessionToken = sessionToken && sessionToken.length > 0 ? sessionToken : "";
 
     const transport = new SSEServerTransport("/messages", res);
     const sessionId = transport.sessionId;
     transports[sessionId] = transport;
-    sessionNotionTokens[sessionId] = resolvedSessionToken;
+    sessionNotionTokens[sessionId] = auth.notionToken;
     transport.onclose = () => {
       delete transports[sessionId];
       delete sessionNotionTokens[sessionId];
     };
 
     const server = createServer();
-    await runWithRuntimeContext({ notionToken: resolvedSessionToken }, async () => {
+    await runWithRuntimeContext({ notionToken: auth.notionToken }, async () => {
       await server.connect(transport);
     });
   });
@@ -1488,6 +1524,13 @@ export async function startHttpBridge(options?: { port?: number; host?: string }
       await transport.handlePostMessage(req, res, req.body);
     });
   });
+
+  return app;
+}
+
+export async function startHttpBridge(options?: HttpBridgeOptions): Promise<void> {
+  const { port, host } = resolveHttpBridgeListenOptions(options);
+  const app = createHttpBridgeApp(options);
 
   await new Promise<void>((resolve) => {
     app.listen(port, host, () => {

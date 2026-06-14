@@ -2,6 +2,12 @@
 
 Production-ready TypeScript MCP server that captures development signals and continuously builds user/admin documentation in Notion.
 
+The local bridge uses HTTP-SSE transport:
+
+- `GET /sse` opens the MCP session stream
+- `POST /messages?sessionId=...` sends JSON-RPC tool calls for that session
+- `GET /health`, `GET /info`, `GET /startup/preflight`, and `GET /contracts/bifrost-discovery` expose runtime and contract checks
+
 ## Quick Start
 
 1. Install dependencies:
@@ -29,94 +35,27 @@ npm run dev
 - `NOTION_TOKEN` for Notion API access
 - `NOTION_PARENT_PAGE_ID` for live integration tests
 - `RUN_LIVE_NOTION_TESTS=true` to enable env-gated live tests
+- `BIFROST_VIRTUAL_KEY` for Bifrost-backed AI calls when the provider is `bifrost`
+- `AUTO_DOC_RUNNER_PROJECT_ID` and `AUTO_DOC_RUNNER_REPO_PATH` to enable the continuous runner
+- `AUTO_DOC_RUNNER_TARGETS` to configure multiple runner targets in one JSON payload
+- `SELF_DOC_PROJECT_ID` and `SELF_DOC_REPO_PATH` are separate runtime config values; they are not the runner source of truth
 
-## Prompt Repository Sync
+## Langflow MCP Development Integration
 
-Use the committed utility to keep Bifrost prompt-repo entries aligned with runtime defaults for:
+This repository includes workspace MCP configuration for Langflow in:
 
-- `auto-doc-analyzer`
-- `auto-doc-reviewer`
-- `auto-doc-gap-filler`
-- `auto-doc-staleness-updater`
+- `.mcp.json`
+- `.vscode/mcp.json`
 
-The script is idempotent: it only creates a new prompt version when content or model metadata changed.
+The default connection uses `uvx mcp-proxy` with `streamablehttp` transport.
 
-Dry-run preview:
+Before running your MCP client in development:
 
-```bash
-npm run prompts:sync:dry-run
-```
+1. Replace `YOUR_LANGFLOW_API_KEY` in both files with your active Langflow API key.
+2. Keep the endpoint as `https://langflow.giscop.com/api/v1/mcp/project/2443b71b-51be-4fc3-9785-1ad162e8fb0a/streamable` unless your project ID changes.
+3. Restart your MCP client/IDE so the server entry is reloaded.
 
-Apply updates:
-
-```bash
-npm run prompts:sync
-```
-
-Optional overrides:
-
-```bash
-node scripts/sync-prompt-repo.mjs --endpoint http://localhost:8080 --model llama3.2:3b-instruct-q4_K_M --temperature 0.1 --max-tokens 2048
-```
-
-Auth: if your prompt-repo endpoint requires auth, export `AI_API_KEY` or pass `--api-key` for Bearer mode.
-For HTTP Basic Auth, export `BIFROST_BASIC_AUTH_USERNAME` and `BIFROST_BASIC_AUTH_PASSWORD` (or pass `--basic-auth-username` / `--basic-auth-password`).
-
-### CI Drift Guard
-
-CI runs `npm run prompts:sync:dry-run` as a required guard in `.github/workflows/ci.yml`.
-
-Set these repository secrets so CI can query your prompt repository:
-
-- `BIFROST_PROMPT_REPO_ENDPOINT` (example: `https://bifrost.your-domain.com`)
-- `BIFROST_PROMPT_REPO_API_KEY` (optional if endpoint is public)
-- `BIFROST_BASIC_AUTH_USERNAME` (optional, for nginx/basic-auth protected endpoints)
-- `BIFROST_BASIC_AUTH_PASSWORD` (optional, for nginx/basic-auth protected endpoints)
-
-Self-hosted note:
-
-- There is no separate "prompt repo API key" in many self-hosted Bifrost setups.
-- Use the same gateway API key your runtime uses for `AI_API_KEY` (commonly `ollama` in this project), or leave it unset if your endpoint does not require auth.
-- If your public Bifrost URL is protected by HTTP Basic Auth, set `BIFROST_BASIC_AUTH_USERNAME` and `BIFROST_BASIC_AUTH_PASSWORD` instead of embedding credentials directly in `BIFROST_PROMPT_REPO_ENDPOINT`.
-- CI accepts either Actions Variables or Actions Secrets for `BIFROST_PROMPT_REPO_ENDPOINT` and `BIFROST_PROMPT_REPO_API_KEY`.
-- If `BIFROST_PROMPT_REPO_API_KEY` is not provided, CI falls back to `ollama`.
-
-Important: GitHub Actions reads from repository Settings -> Secrets and variables -> Actions, not Codespaces secrets.
-
-If drift is detected, CI fails and prints which prompt would require a new version.
-
-### One-Click Connectivity Check
-
-Use manual workflow `.github/workflows/prompt-endpoint-connectivity.yml` to validate Actions networking and auth to your configured prompt endpoint.
-
-- Trigger from GitHub Actions: `Prompt Endpoint Connectivity Check`.
-- Required workflow input: `endpoint` (example: `https://bifrost.giscop.com`).
-- Prints safe diagnostics only (HTTP code, connect/total time, remote IP, response size).
-- If endpoint is missing or unreachable from GitHub-hosted runners, the workflow fails with explicit guidance.
-
-## Cloud Failover Smoke Test
-
-Use the one-command smoke test to force local model failure and verify OpenRouter fallback is actually used.
-
-1. Export your OpenRouter key:
-
-```bash
-export OPENROUTER_API_KEY=<your-openrouter-key>
-```
-
-2. Run:
-
-```bash
-npm run failover:smoke
-```
-
-Optional overrides:
-
-```bash
-node scripts/forced-cloud-failover-smoke.mjs --cloud-model openai/gpt-4o-mini --endpoint http://localhost:8080/v1 --bifrost-endpoint http://localhost:8080
-```
-
-Success criteria: output contains `providerUsed` starting with `openrouter:` and exits with code `0`.
+If `uvx` is not available in your shell PATH, install/repair your `uv` toolchain first.
 
 ## CI
 

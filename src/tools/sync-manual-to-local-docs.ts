@@ -1,6 +1,6 @@
-// @ts-nocheck
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { renderManualMarkdown } from "../lib/export.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
@@ -9,37 +9,85 @@ import { createNotionClient } from "../lib/notion-client.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import { getStateStore } from "../lib/state-store.js";
-function getTitleValue(properties, key) {
+import type { Audience, DocumentationStatus } from "../types.js";
+
+type AudienceFilter = "user" | "admin" | "both";
+type PropertyMap = Record<string, unknown>;
+type RichTextPart = { plain_text?: string };
+type NotionPage = { id: string; properties?: PropertyMap };
+type QueryInput = { database_id: string; filter?: unknown; page_size?: number; start_cursor?: string };
+type QueryResponse = { results: NotionPage[]; has_more?: boolean; next_cursor?: string | null };
+type BlockResponse = { results: Array<{ type?: string; paragraph?: { rich_text?: RichTextPart[] } }> };
+type NotionClientLike = {
+    databases: { query(input: QueryInput): Promise<QueryResponse> };
+    blocks: { children: { list(input: { block_id: string; page_size: number }): Promise<BlockResponse> } };
+};
+type PublishedEntry = {
+    title: string;
+    entryType: string;
+    audience: Audience;
+    status: DocumentationStatus;
+    body: string;
+};
+type LoadPublishedEntriesInput = {
+    notion: NotionClientLike;
+    manualEntriesDatabaseId: string;
+    projectPageId: string;
+    releasePageId?: string;
+};
+type ResolveReleasePageInput = {
+    notion: NotionClientLike;
+    releasesDatabaseId: string;
+    projectPageId: string;
+    releaseVersion?: string;
+};
+type SyncManualToLocalDocsInput = {
+    projectId: string;
+    audience?: AudienceFilter;
+    outputPath?: string;
+    releaseVersion?: string;
+    traceId?: string;
+};
+
+function getTitleValue(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.title?.[0]?.text?.content ?? null;
+    return typeof value === "object" && value !== null
+        ? ((value as { title?: Array<{ text?: { content?: string } }> }).title?.[0]?.text?.content ?? null)
+        : null;
 }
-function getSelectName(properties, key) {
+function getSelectName(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.select?.name ?? null;
+    return typeof value === "object" && value !== null ? ((value as { select?: { name?: string } }).select?.name ?? null) : null;
 }
-function getStatusName(properties, key) {
+function getStatusName(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.status?.name ?? null;
+    return typeof value === "object" && value !== null ? ((value as { status?: { name?: string } }).status?.name ?? null) : null;
 }
-async function queryAll(notion, input) {
-    const results = [];
-    let cursor;
+function normalizeAudience(value: string | null): Audience {
+    return value === "User" || value === "Admin" || value === "Both" || value === "Internal" ? value : "Internal";
+}
+function normalizeStatus(value: string | null): DocumentationStatus {
+    return value === "Captured" || value === "Needs Review" || value === "Approved" || value === "Published" ? value : "Captured";
+}
+async function queryAll(notion: NotionClientLike, input: QueryInput): Promise<NotionPage[]> {
+    const results: NotionPage[] = [];
+    let cursor: string | undefined;
     do {
-        const payload = {
+        const payload: QueryInput = {
             ...input,
             ...(cursor ? { start_cursor: cursor } : {}),
         };
-        const response = (await withNotionRetry(() => notion.databases.query(payload), {
+        const response = await withNotionRetry(() => notion.databases.query(payload), {
             operationName: "databases.query",
             payload,
-        }));
+        });
         results.push(...response.results);
         cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
     } while (cursor);
     return results;
 }
-async function loadEntryBody(notion, pageId) {
-    const response = (await withNotionRetry(() => notion.blocks.children.list({
+async function loadEntryBody(notion: NotionClientLike, pageId: string): Promise<string> {
+    const response = await withNotionRetry(() => notion.blocks.children.list({
         block_id: pageId,
         page_size: 100,
     }), {
@@ -48,21 +96,21 @@ async function loadEntryBody(notion, pageId) {
             block_id: pageId,
             page_size: 100,
         },
-    }));
-    const lines = [];
+    });
+    const lines: string[] = [];
     for (const block of response.results) {
         if (block.type !== "paragraph") {
             continue;
         }
-        const text = (block.paragraph?.rich_text ?? []).map((part) => part.plain_text ?? "").join("").trim();
+        const text = (block.paragraph?.rich_text ?? []).map((part: RichTextPart) => part.plain_text ?? "").join("").trim();
         if (text) {
             lines.push(text);
         }
     }
     return lines.join("\n");
 }
-async function loadPublishedEntries(input) {
-    const filters = [
+async function loadPublishedEntries(input: LoadPublishedEntriesInput): Promise<PublishedEntry[]> {
+    const filters: unknown[] = [
         {
             property: "Project",
             relation: { contains: input.projectPageId },
@@ -83,20 +131,20 @@ async function loadPublishedEntries(input) {
         filter: { and: filters },
         page_size: 100,
     });
-    const entries = [];
+    const entries: PublishedEntry[] = [];
     for (const page of pages) {
         const properties = page.properties ?? {};
         entries.push({
             title: getTitleValue(properties, "Entry Title") ?? `Entry ${page.id}`,
             entryType: getSelectName(properties, "Entry Type") ?? "",
-            audience: (getSelectName(properties, "Audience") ?? "Internal"),
-            status: (getStatusName(properties, "Status") ?? "Captured"),
+            audience: normalizeAudience(getSelectName(properties, "Audience")),
+            status: normalizeStatus(getStatusName(properties, "Status")),
             body: await loadEntryBody(input.notion, page.id),
         });
     }
     return entries;
 }
-async function resolveReleasePageId(input) {
+async function resolveReleasePageId(input: ResolveReleasePageInput): Promise<string | undefined> {
     if (!input.releaseVersion) {
         return undefined;
     }
@@ -118,14 +166,14 @@ async function resolveReleasePageId(input) {
     });
     return releases[0]?.id;
 }
-export function registerSyncManualToLocalDocsTool(server) {
+export function registerSyncManualToLocalDocsTool(server: McpServer): void {
     server.tool("sync_manual_to_local_docs", "Pulls published manual content from Notion and writes it to a local markdown file.", {
         projectId: z.string(),
         audience: z.enum(["user", "admin", "both"]).default("both"),
         outputPath: z.string().default("docs/MANUAL.md"),
         releaseVersion: z.string().optional(),
         traceId: z.string().optional(),
-    }, async ({ projectId, audience, outputPath, releaseVersion, traceId: incomingTraceId }) => {
+    }, async ({ projectId, audience = "both", outputPath = "docs/MANUAL.md", releaseVersion, traceId: incomingTraceId }: SyncManualToLocalDocsInput) => {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         logToolEvent({
@@ -142,8 +190,9 @@ export function registerSyncManualToLocalDocsTool(server) {
             if (!project) {
                 throw new Error("Unknown projectId. Run initialize_project_manual first.");
             }
-            const notion = createNotionClient();
-            await runProjectPreflight({ notion, project });
+            const rawNotion = createNotionClient();
+            await runProjectPreflight({ notion: rawNotion, project });
+            const notion = rawNotion as unknown as NotionClientLike;
             const projectPageId = project.projectPageId ?? project.projectId;
             const releasePageId = await resolveReleasePageId({
                 notion,

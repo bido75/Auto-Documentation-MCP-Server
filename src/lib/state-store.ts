@@ -1,6 +1,6 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
 import { getOptionalRuntimeConfig } from "../config.js";
 
 export const CURRENT_STATE_SCHEMA_VERSION = 3;
@@ -69,6 +69,7 @@ interface StateShape {
 }
 
 const DEFAULT_STATE: StateShape = { schemaVersion: CURRENT_STATE_SCHEMA_VERSION, projects: {} };
+const mutationQueues = new Map<string, Promise<void>>();
 
 interface StateEnvelope {
   schemaVersion: number;
@@ -178,12 +179,37 @@ function migrateState(raw: LegacyStateShape): { migrated: StateShape; changed: b
   return { migrated, changed };
 }
 
+async function runExclusive<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+  const key = resolve(filePath);
+  const previous = mutationQueues.get(key) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolveQueued) => {
+    release = resolveQueued;
+  });
+  const queued = previous.then(() => current, () => current);
+  mutationQueues.set(key, queued);
+
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (mutationQueues.get(key) === queued) {
+      mutationQueues.delete(key);
+    }
+  }
+}
+
 export class StateStore {
   constructor(private readonly filePath = ".auto-doc/state.json") {}
 
   async load(): Promise<StateShape> {
+    return this.loadFromPath(this.filePath);
+  }
+
+  private async loadFromPath(filePath: string): Promise<StateShape> {
     try {
-      const raw = await readFile(this.filePath, "utf8");
+      const raw = await readFile(filePath, "utf8");
       const parsed = JSON.parse(raw) as LegacyStateShape | StateEnvelope;
       let source: LegacyStateShape;
 
@@ -218,6 +244,13 @@ export class StateStore {
         return { ...DEFAULT_STATE };
       }
 
+      if (filePath === this.filePath) {
+        const backup = await this.loadFromPath(`${this.filePath}.bak`).catch(() => null);
+        if (backup) {
+          return backup;
+        }
+      }
+
       throw error;
     }
   }
@@ -230,7 +263,8 @@ export class StateStore {
       checksum: computeChecksum(state),
       encryptedState,
     };
-    const tempFilePath = `${this.filePath}.tmp`;
+    const tempFilePath = `${this.filePath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+    await copyFile(this.filePath, `${this.filePath}.bak`).catch(() => undefined);
     await writeFile(tempFilePath, JSON.stringify(envelope, null, 2), "utf8");
     try {
       await rename(tempFilePath, this.filePath);
@@ -240,10 +274,18 @@ export class StateStore {
     }
   }
 
+  private async mutate(mutator: (state: StateShape) => void | Promise<void>): Promise<void> {
+    await runExclusive(this.filePath, async () => {
+      const state = await this.load();
+      await mutator(state);
+      await this.save(state);
+    });
+  }
+
   async upsertProject(project: ProjectState): Promise<ProjectState> {
-    const state = await this.load();
-    state.projects[project.projectId] = project;
-    await this.save(state);
+    await this.mutate((state) => {
+      state.projects[project.projectId] = project;
+    });
     return project;
   }
 
@@ -253,14 +295,14 @@ export class StateStore {
   }
 
   async setFeature(projectId: string, featureKey: string, featurePageId: string): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.featuresByKey[featureKey] = featurePageId;
-    await this.save(state);
+      project.featuresByKey[featureKey] = featurePageId;
+    });
   }
 
   async getFeature(projectId: string, featureKey: string): Promise<string | null> {
@@ -269,14 +311,14 @@ export class StateStore {
   }
 
   async setEvent(projectId: string, externalEventId: string, notionPageId: string): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.eventsByExternalId[externalEventId] = notionPageId;
-    await this.save(state);
+      project.eventsByExternalId[externalEventId] = notionPageId;
+    });
   }
 
   async getEvent(projectId: string, externalEventId: string): Promise<string | null> {
@@ -285,14 +327,14 @@ export class StateStore {
   }
 
   async setEventSnapshot(projectId: string, externalEventId: string, snapshot: EventSnapshot): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.eventSnapshots[externalEventId] = snapshot;
-    await this.save(state);
+      project.eventSnapshots[externalEventId] = snapshot;
+    });
   }
 
   async getEventSnapshot(projectId: string, externalEventId: string): Promise<EventSnapshot | null> {
@@ -306,14 +348,14 @@ export class StateStore {
   }
 
   async setLastSeenReleaseTag(projectId: string, _repoPath: string, releaseTag: string): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.lastSeenReleaseTag = releaseTag;
-    await this.save(state);
+      project.lastSeenReleaseTag = releaseTag;
+    });
   }
 
   async listReleaseAutomationRuns(projectId: string, _repoPath: string): Promise<ReleaseAutomationRun[]> {
@@ -330,21 +372,21 @@ export class StateStore {
     attemptedAt: string;
     errorMessage?: string;
   }): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[input.projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${input.projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[input.projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${input.projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.releaseAutomationRuns = project.releaseAutomationRuns ?? [];
-    project.releaseAutomationRuns.unshift({
-      releaseTag: input.releaseTag,
-      releaseVersion: input.releaseVersion,
-      status: input.status,
-      attemptedAt: input.attemptedAt,
-      errorMessage: input.errorMessage,
+      project.releaseAutomationRuns = project.releaseAutomationRuns ?? [];
+      project.releaseAutomationRuns.unshift({
+        releaseTag: input.releaseTag,
+        releaseVersion: input.releaseVersion,
+        status: input.status,
+        attemptedAt: input.attemptedAt,
+        errorMessage: input.errorMessage,
+      });
     });
-    await this.save(state);
   }
 
   async getReleaseAutomationRun(projectId: string, _repoPath: string, releaseTag: string): Promise<ReleaseAutomationRun | null> {
@@ -363,44 +405,44 @@ export class StateStore {
     repoPathOrMetadata: string | RunnerFailureTriageMetadata,
     maybeMetadata?: RunnerFailureTriageMetadata,
   ): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    const metadata = typeof repoPathOrMetadata === "string" ? maybeMetadata : repoPathOrMetadata;
-    if (!metadata) {
-      throw new Error("Runner failure triage metadata is required.");
-    }
+      const metadata = typeof repoPathOrMetadata === "string" ? maybeMetadata : repoPathOrMetadata;
+      if (!metadata) {
+        throw new Error("Runner failure triage metadata is required.");
+      }
 
-    project.runnerFailureTriage = metadata;
-    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory ?? [];
-    project.runnerFailureTriageHistory.unshift({
-      changedAt: new Date().toISOString(),
-      action: "set",
-      metadata,
+      project.runnerFailureTriage = metadata;
+      project.runnerFailureTriageHistory = project.runnerFailureTriageHistory ?? [];
+      project.runnerFailureTriageHistory.unshift({
+        changedAt: new Date().toISOString(),
+        action: "set",
+        metadata,
+      });
+      project.runnerFailureTriageHistory = project.runnerFailureTriageHistory.slice(0, 100);
     });
-    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory.slice(0, 100);
-    await this.save(state);
   }
 
   async clearRunnerFailureTriageMetadata(projectId: string, _repoPath: string): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.runnerFailureTriage = {};
-    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory ?? [];
-    project.runnerFailureTriageHistory.unshift({
-      changedAt: new Date().toISOString(),
-      action: "clear",
-      metadata: null,
+      project.runnerFailureTriage = {};
+      project.runnerFailureTriageHistory = project.runnerFailureTriageHistory ?? [];
+      project.runnerFailureTriageHistory.unshift({
+        changedAt: new Date().toISOString(),
+        action: "clear",
+        metadata: null,
+      });
+      project.runnerFailureTriageHistory = project.runnerFailureTriageHistory.slice(0, 100);
     });
-    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory.slice(0, 100);
-    await this.save(state);
   }
 
   async listRunnerFailureTriageHistory(

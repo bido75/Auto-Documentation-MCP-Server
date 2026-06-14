@@ -3,6 +3,7 @@ import { z } from "zod";
 import { scoreDocumentationConfidence } from "../analysis/confidence.js";
 import { createFeatureKey } from "../analysis/feature-key.js";
 import { classifyManualWorthiness } from "../analysis/manual-worthiness.js";
+import { analyzeDocumentationCandidate } from "../lib/analyzer.js";
 import { createNotionClient } from "../lib/notion-client.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
@@ -192,65 +193,20 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
         }
 
         const summaries = evidence.map((item) => item.summary);
-        const filesChanged = evidence.flatMap((item) => item.filesChanged);
-        const eventTypes = evidence.map((item) => item.eventType);
-        const testStatuses = evidence.map((item) => item.testStatus);
-
         const featureName = inferFeatureNameFromEvidence(summaries);
 
         try {
-          const evidenceHaystack = `${summaries.join(" ")} ${filesChanged.join(" ")}`.toLowerCase();
-        const moduleName = inferModuleFromEvidence(evidenceHaystack);
-        const route = inferRoute(filesChanged, summaries);
-
-        const worthiness = classifyManualWorthiness({
-          summary: summaries.join("\n"),
-          filesChanged,
-        });
-
-        const featureKey = createFeatureKey({
-          module: moduleName,
-          featureName,
-          route,
-        });
-
-        const existingHit = input.existingFeatureKeys?.includes(featureKey) ?? false;
-        const confidence = scoreDocumentationConfidence({
-          manualWorthy: worthiness.shouldDocument,
-          featureNameMatched: summaries.join(" ").toLowerCase().includes(featureName.toLowerCase()),
-          testsPassed: inferTestsPassed(testStatuses, eventTypes),
-          mergedOrReleased: inferMergedOrReleased(eventTypes),
-          concreteDocumentation: summaries.join(" ").length > 80,
-          ambiguousPurpose: !worthiness.shouldDocument,
-          duplicateUncertain: !existingHit && (input.existingFeatureKeys?.length ?? 0) > 0,
-        });
-
-        const audiences = worthiness.audiences;
-        const entryTypes = audiences.flatMap<EntryType>((audience) => {
-          if (audience === "User") {
-            return ["User Guide"];
-          }
-
-          if (audience === "Admin") {
-            return ["Admin Guide"];
-          }
-
-          return [];
-        });
-
-        const response: AnalyzeDocumentationCandidateResult = {
-          shouldDocument: worthiness.shouldDocument,
-          featureKey,
-          featureName,
-          audiences,
-          entryTypes,
-          confidenceScore: confidence.score,
-          confidenceReasons: [...worthiness.reasons, ...confidence.reasons],
-          reviewQuestions: confidence.reviewQuestions,
-          fallbackStatus: null,
-          fallbackEntryId: null,
-          fallbackReasonCode: FALLBACK_REASON_CODES.NONE,
-        };
+          const analysis = await analyzeDocumentationCandidate({
+            projectId: input.projectId,
+            evidence,
+            existingFeatureKeys: input.existingFeatureKeys,
+          });
+          const {
+            generatedNarratives: _generatedNarratives,
+            dedupeDecision: _dedupeDecision,
+            matchedExistingFeatureKey: _matchedExistingFeatureKey,
+            ...response
+          } = analysis;
 
         logToolEvent({
           level: "info",

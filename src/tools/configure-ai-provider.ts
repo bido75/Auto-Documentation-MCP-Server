@@ -1,14 +1,24 @@
-// @ts-nocheck
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { buildCandidate, resetProvider } from "../providers/factory.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { storeApiKey } from "../installer/token-store.js";
-function upsertEnvContents(existing, updates) {
+
+type ConfigureAiProviderInput = {
+    providerType: string;
+    endpoint?: string;
+    apiKey?: string;
+    modelName?: string;
+    runHealthCheck?: boolean;
+    traceId?: string;
+};
+
+function upsertEnvContents(existing: string, updates: Record<string, string | undefined>): string {
     const lines = existing.length > 0 ? existing.split(/\r?\n/) : [];
-    const next = new Map();
+    const next = new Map<string, string>();
     for (const line of lines) {
         const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
         if (match) {
@@ -24,7 +34,7 @@ function upsertEnvContents(existing, updates) {
         .map(([key, value]) => `${key}=${value}`)
         .join("\n")}\n`;
 }
-export function registerConfigureAiProviderTool(server) {
+export function registerConfigureAiProviderTool(server: McpServer): void {
     server.tool("configure_ai_provider", "Set the AI model provider for documentation generation. Supports local Ollama, cloud Claude/GPT-4, Bifrost gateway, or deterministic mode.", {
         providerType: z.enum([
             "deterministic",
@@ -43,7 +53,7 @@ export function registerConfigureAiProviderTool(server) {
         modelName: z.string().optional(),
         runHealthCheck: z.boolean().default(true),
         traceId: z.string().optional(),
-    }, async ({ providerType, endpoint, apiKey, modelName, runHealthCheck, traceId: incomingTraceId }) => {
+    }, async ({ providerType, endpoint, apiKey, modelName, runHealthCheck = true, traceId: incomingTraceId }: ConfigureAiProviderInput) => {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         try {

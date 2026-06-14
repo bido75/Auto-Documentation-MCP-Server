@@ -74,3 +74,12 @@ export async function analyzeWithFallback(evidence: StructuredEvidence): Promise
     return fallbackProvider.analyze(evidence);
   }
 }
+
+export async function embedText(text: string): Promise<number[]> {
+  const provider = await getProvider();
+  if (!provider.supportsEmbeddings || !provider.embed) {
+    throw new Error(`Provider ${provider.id} does not support embeddings.`);
+  }
+
+  return provider.embed(text);
+}

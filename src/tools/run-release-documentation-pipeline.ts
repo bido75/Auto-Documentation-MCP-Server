@@ -1,4 +1,4 @@
-// @ts-nocheck
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
@@ -9,23 +9,34 @@ import { registerPackageManualTool } from "./package-manual.js";
 import { registerPublishPrCommentTool } from "./publish-pr-comment.js";
 import { registerRunAutonomousDocumentationTriggerTool } from "./run-autonomous-documentation-trigger.js";
 import { registerSyncManualToLocalDocsTool } from "./sync-manual-to-local-docs.js";
+
+type ToolCallResult = {
+    content: Array<{ type: string; text: string }>;
+};
+
+type ToolHandler = (input: unknown) => Promise<ToolCallResult>;
+
 class InMemoryToolHost {
-    handlers = new Map();
-    tool(name, _description, _schema, handler) {
+    readonly handlers = new Map<string, ToolHandler>();
+
+    tool(name: string, _description: string, _schema: unknown, handler: ToolHandler) {
         this.handlers.set(name, handler);
     }
 }
-function parseToolText(result) {
+
+function parseToolText<T>(result: ToolCallResult): T {
     const first = result.content[0];
     if (!first || first.type !== "text") {
         throw new Error("Tool did not return a text payload.");
     }
-    return JSON.parse(first.text);
+    return JSON.parse(first.text) as T;
 }
-function defaultPdfPath(releaseVersion) {
+
+function defaultPdfPath(releaseVersion: string): string {
     return `artifacts/manual-${releaseVersion}.pdf`;
 }
-export function registerRunReleaseDocumentationPipelineTool(server) {
+
+export function registerRunReleaseDocumentationPipelineTool(server: McpServer) {
     server.tool("run_release_documentation_pipeline", "Runs release-tag documentation automation: capture, changelog, package, PDF export, local sync, and optional PR comment posting.", {
         projectId: z.string(),
         releaseVersion: z.string().min(1),
@@ -51,13 +62,14 @@ export function registerRunReleaseDocumentationPipelineTool(server) {
         });
         try {
             const host = new InMemoryToolHost();
-            registerRunAutonomousDocumentationTriggerTool(host);
-            registerGenerateReleaseChangelogTool(host);
-            registerPackageManualTool(host);
-            registerExportManualPdfTool(host);
-            registerSyncManualToLocalDocsTool(host);
-            registerExportHelpCenterContentTool(host);
-            registerPublishPrCommentTool(host);
+            const hostServer = host as unknown as McpServer;
+            registerRunAutonomousDocumentationTriggerTool(hostServer);
+            registerGenerateReleaseChangelogTool(hostServer);
+            registerPackageManualTool(hostServer);
+            registerExportManualPdfTool(hostServer);
+            registerSyncManualToLocalDocsTool(hostServer);
+            registerExportHelpCenterContentTool(hostServer);
+            registerPublishPrCommentTool(hostServer);
             const runTrigger = host.handlers.get("run_autonomous_documentation_trigger");
             const generateChangelog = host.handlers.get("generate_release_changelog");
             const packageManual = host.handlers.get("package_manual");

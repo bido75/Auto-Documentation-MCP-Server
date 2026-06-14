@@ -1,26 +1,23 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { getOptionalRuntimeConfig } from "../config.js";
 
-type RuntimeContext = {
+export type RuntimeContext = {
   notionToken?: string;
 };
 
-export async function runWithRuntimeContext<T>(context: RuntimeContext, fn: () => Promise<T>): Promise<T> {
-  const previous = process.env.NOTION_TOKEN;
-  if (context.notionToken !== undefined) {
-    process.env.NOTION_TOKEN = context.notionToken;
-  }
+const runtimeContextStorage = new AsyncLocalStorage<RuntimeContext>();
 
-  try {
-    return await fn();
-  } finally {
-    if (previous === undefined) {
-      delete process.env.NOTION_TOKEN;
-    } else {
-      process.env.NOTION_TOKEN = previous;
-    }
-  }
+export async function runWithRuntimeContext<T>(context: RuntimeContext, fn: () => Promise<T>): Promise<T> {
+  const current = runtimeContextStorage.getStore();
+  return runtimeContextStorage.run({ ...current, ...context }, fn);
 }
 
-export function resolveRuntimeConfig() {
-  return getOptionalRuntimeConfig();
+export function getRuntimeContext(): RuntimeContext {
+  return runtimeContextStorage.getStore() ?? {};
+}
+
+export function resolveRuntimeConfig(env = process.env) {
+  const runtime = getOptionalRuntimeConfig(env);
+  const context = getRuntimeContext();
+  return context.notionToken !== undefined ? { ...runtime, notionToken: context.notionToken || undefined } : runtime;
 }

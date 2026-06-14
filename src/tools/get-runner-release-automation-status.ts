@@ -1,16 +1,25 @@
-// @ts-nocheck
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { getStateStore } from "../lib/state-store.js";
-export function registerGetRunnerReleaseAutomationStatusTool(server) {
+
+type ReleaseAutomationStatusInput = {
+    projectId: string;
+    repoPath: string;
+    releaseTag?: string;
+    limit?: number;
+    traceId?: string;
+};
+
+export function registerGetRunnerReleaseAutomationStatusTool(server: McpServer): void {
     server.tool("get_runner_release_automation_status", "Reports persisted runner release automation status for a project and repository target.", {
         projectId: z.string().min(1),
         repoPath: z.string().min(1),
         releaseTag: z.string().min(1).optional(),
         limit: z.number().int().min(1).max(100).default(10),
         traceId: z.string().optional(),
-    }, async ({ projectId, repoPath, releaseTag, limit, traceId: incomingTraceId }) => {
+    }, async ({ projectId, repoPath, releaseTag, limit = 10, traceId: incomingTraceId }: ReleaseAutomationStatusInput) => {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         logToolEvent({

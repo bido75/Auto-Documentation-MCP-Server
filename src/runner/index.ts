@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { getOptionalRuntimeConfig, getRuntimeConfig } from "../config.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
+import { ContinuousDocumentationRunner } from "./continuous-documentation-runner.js";
 
 function parseBoolean(value: string | undefined): boolean | undefined {
   if (value === undefined) {
@@ -167,9 +168,20 @@ export function parseContinuousRunnerConfig(env = process.env) {
   };
 }
 
-export async function runContinuousDocumentationRunner(env = process.env): Promise<void> {
+export async function runContinuousDocumentationRunner(env = process.env): Promise<ContinuousDocumentationRunner> {
   const config = parseContinuousRunnerConfig(env);
   const traceId = resolveTraceId(config.traceId);
+  const runner = new ContinuousDocumentationRunner(config);
+
+  const stopRunner = () => {
+    void runner.stop().finally(() => {
+      process.exitCode = process.exitCode ?? 0;
+    });
+  };
+
+  process.once("SIGINT", stopRunner);
+  process.once("SIGTERM", stopRunner);
+
   logToolEvent({
     level: "info",
     tool: "continuous_documentation_runner_entrypoint",
@@ -178,6 +190,8 @@ export async function runContinuousDocumentationRunner(env = process.env): Promi
     message: "Starting continuous documentation runner.",
     data: { pollIntervalMs: config.pollIntervalMs, targetCount: config.targets.length },
   });
+  await runner.start();
+  return runner;
 }
 
 const isExecutedDirectly = fileURLToPath(import.meta.url) === process.argv[1];

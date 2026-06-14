@@ -1,7 +1,7 @@
-// @ts-nocheck
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
-export async function installGitHook(repoPath, serverPath) {
+
+export async function installGitHook(repoPath: string, serverPath: string): Promise<void> {
     const hookPath = path.join(repoPath, ".git", "hooks", "post-commit");
     await fs.mkdir(path.dirname(hookPath), { recursive: true });
     const marker = "Auto-Doc MCP - post-commit hook";
