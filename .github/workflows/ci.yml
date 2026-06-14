@@ -59,8 +59,31 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Lint
+        run: npm run lint
+
       - name: Run tests
         run: npm test
 
       - name: Build
         run: npm run build
+
+      - name: Docker bridge smoke
+        run: |
+          set -euo pipefail
+          docker build -t auto-docs-notion-mcp:ci .
+          docker run -d --name auto-doc-bridge-smoke \
+            -e STATE_ENCRYPTION_KEY=ci-secure-state-encryption-key-change-me \
+            -e AUTO_DOC_HTTP_HOST=0.0.0.0 \
+            -e AUTO_DOC_HTTP_PORT=3000 \
+            -p 3000:3000 \
+            auto-docs-notion-mcp:ci
+          trap 'docker rm -f auto-doc-bridge-smoke >/dev/null 2>&1 || true' EXIT
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            if curl -fsS http://127.0.0.1:3000/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs auto-doc-bridge-smoke
+          exit 1

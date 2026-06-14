@@ -1,4 +1,4 @@
-import { getOptionalRuntimeConfig } from "../config.js";
+import { resolveOptionalRuntimeConfig } from "../lib/runtime-context.js";
 import { buildSharedPromptContent, type ModelAnalysis, type ModelProvider, type StructuredEvidence } from "./base.js";
 
 export class OllamaProvider implements ModelProvider {
@@ -6,7 +6,7 @@ export class OllamaProvider implements ModelProvider {
   readonly displayName: string;
 
   constructor(public readonly providerId = "local-ollama") {
-    this.displayName = `Ollama (${getOptionalRuntimeConfig().provider.modelName})`;
+    this.displayName = `Ollama (${resolveOptionalRuntimeConfig().provider.modelName})`;
   }
 
   get id(): string {
@@ -14,7 +14,7 @@ export class OllamaProvider implements ModelProvider {
   }
 
   async healthCheck(): Promise<boolean> {
-    const runtime = getOptionalRuntimeConfig();
+    const runtime = resolveOptionalRuntimeConfig();
     try {
       const response = await fetch(`${runtime.provider.endpoint}/api/tags`, { signal: AbortSignal.timeout(5000) });
       return response.ok;
@@ -24,7 +24,7 @@ export class OllamaProvider implements ModelProvider {
   }
 
   async analyze(ev: StructuredEvidence): Promise<ModelAnalysis> {
-    const runtime = getOptionalRuntimeConfig();
+    const runtime = resolveOptionalRuntimeConfig();
     const startedAt = Date.now();
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), runtime.provider.timeoutMs);
@@ -55,7 +55,7 @@ export class OllamaProvider implements ModelProvider {
   }
 
   async embed(text: string): Promise<number[]> {
-    const runtime = getOptionalRuntimeConfig();
+    const runtime = resolveOptionalRuntimeConfig();
     const response = await fetch(`${runtime.embedding.endpoint ?? runtime.provider.endpoint}/api/embeddings`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

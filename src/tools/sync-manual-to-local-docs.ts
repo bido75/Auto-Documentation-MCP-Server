@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { renderManualMarkdown } from "../lib/export.js";
+import { resolveArtifactPath } from "../lib/artifact-paths.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { createNotionClient } from "../lib/notion-client.js";
@@ -185,6 +186,7 @@ export function registerSyncManualToLocalDocsTool(server: McpServer): void {
             data: { projectId, audience, outputPath, releaseVersion: releaseVersion ?? null },
         });
         try {
+            const safeOutputPath = resolveArtifactPath(outputPath);
             const store = getStateStore();
             const project = await store.getProject(projectId);
             if (!project) {
@@ -211,8 +213,8 @@ export function registerSyncManualToLocalDocsTool(server: McpServer): void {
                 audience,
                 entries,
             });
-            await mkdir(dirname(outputPath), { recursive: true });
-            await writeFile(outputPath, markdown, "utf-8");
+            await mkdir(dirname(safeOutputPath), { recursive: true });
+            await writeFile(safeOutputPath, markdown, "utf-8");
             logToolEvent({
                 level: "info",
                 tool: "sync_manual_to_local_docs",
@@ -221,7 +223,7 @@ export function registerSyncManualToLocalDocsTool(server: McpServer): void {
                 message: "Synced manual content to local docs",
                 data: {
                     projectId,
-                    outputPath,
+                    outputPath: safeOutputPath,
                     entryCount: entries.length,
                     byteLength: Buffer.byteLength(markdown, "utf-8"),
                     durationMs: Date.now() - startedAt,
@@ -236,7 +238,7 @@ export function registerSyncManualToLocalDocsTool(server: McpServer): void {
                             projectId,
                             releaseVersion: releaseVersion ?? null,
                             audience,
-                            outputPath,
+                            outputPath: safeOutputPath,
                             entryCount: entries.length,
                             byteLength: Buffer.byteLength(markdown, "utf-8"),
                         }, null, 2),

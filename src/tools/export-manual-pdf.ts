@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createNotionClient } from "../lib/notion-client.js";
+import { resolveArtifactPath } from "../lib/artifact-paths.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
@@ -167,6 +168,7 @@ export function registerExportManualPdfTool(server: McpServer): void {
             data: { projectId, releaseVersion, audience, outputPath },
         });
         try {
+            const safeOutputPath = resolveArtifactPath(outputPath);
             const store = getStateStore();
             const project = await store.getProject(projectId);
             if (!project) {
@@ -211,7 +213,7 @@ export function registerExportManualPdfTool(server: McpServer): void {
             const pdfPath = await generatePdfFromMarkdown({
                 title: `${project.projectName} ${releaseVersion} Manual`,
                 markdown,
-                outputPath,
+                outputPath: safeOutputPath,
             });
             logToolEvent({
                 level: "info",

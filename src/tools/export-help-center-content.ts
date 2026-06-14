@@ -5,6 +5,7 @@ import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { createNotionClient } from "../lib/notion-client.js";
+import { resolveArtifactPath } from "../lib/artifact-paths.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import { getStateStore } from "../lib/state-store.js";
@@ -270,6 +271,7 @@ export function registerExportHelpCenterContentTool(server: McpServer): void {
             data: { projectId, audience, releaseVersion: releaseVersion ?? null, outputPath: outputPath ?? null },
         });
         try {
+            const safeOutputPath = outputPath ? resolveArtifactPath(outputPath) : null;
             const store = getStateStore();
             const project = await store.getProject(projectId);
             if (!project) {
@@ -297,9 +299,9 @@ export function registerExportHelpCenterContentTool(server: McpServer): void {
                 releaseVersion,
                 entries,
             });
-            if (outputPath) {
-                await mkdir(dirname(outputPath), { recursive: true });
-                await writeFile(outputPath, JSON.stringify(payload, null, 2), "utf-8");
+            if (safeOutputPath) {
+                await mkdir(dirname(safeOutputPath), { recursive: true });
+                await writeFile(safeOutputPath, JSON.stringify(payload, null, 2), "utf-8");
             }
             logToolEvent({
                 level: "info",
@@ -311,7 +313,7 @@ export function registerExportHelpCenterContentTool(server: McpServer): void {
                     projectId,
                     audience,
                     releaseVersion: releaseVersion ?? null,
-                    outputPath: outputPath ?? null,
+                    outputPath: safeOutputPath,
                     sectionCount: payload.sectionCount,
                     articleCount: payload.articleCount,
                     durationMs: Date.now() - startedAt,
@@ -324,7 +326,7 @@ export function registerExportHelpCenterContentTool(server: McpServer): void {
                         text: JSON.stringify({
                             traceId,
                             ...payload,
-                            outputPath: outputPath ?? null,
+                            outputPath: safeOutputPath,
                         }, null, 2),
                     },
                 ],

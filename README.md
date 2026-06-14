@@ -19,6 +19,7 @@ npm ci
 2. Run checks:
 
 ```bash
+npm run lint
 npm run typecheck
 npm test
 npm run build
@@ -39,6 +40,20 @@ npm run dev
 - `AUTO_DOC_RUNNER_PROJECT_ID` and `AUTO_DOC_RUNNER_REPO_PATH` to enable the continuous runner
 - `AUTO_DOC_RUNNER_TARGETS` to configure multiple runner targets in one JSON payload
 - `SELF_DOC_PROJECT_ID` and `SELF_DOC_REPO_PATH` are separate runtime config values; they are not the runner source of truth
+- `STATE_ENCRYPTION_KEY` must be a unique high-entropy value in production, bridge mode, and runner mode
+- `AUTO_DOC_ARTIFACT_ROOT` constrains generated PDFs, local docs, help-center exports, and screenshots
+
+Generate a production state key:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
+
+## Runtime Modes
+
+Container default: HTTP bridge mode. The Docker image starts `node build/src/cli/index.js bridge`, exposes `/health`, and is intended for web, Bifrost, and tunnel deployments.
+
+Use stdio MCP locally with `npm run dev` or `node build/src/index.js`. Use continuous mode with `AUTO_DOC_RUNTIME_MODE=runner node build/src/index.js` or `node build/src/cli/index.js runner` after configuring runner targets.
 
 ## Langflow MCP Development Integration
 
@@ -59,7 +74,7 @@ If `uvx` is not available in your shell PATH, install/repair your `uv` toolchain
 
 ## CI
 
-GitHub Actions runs typecheck, tests, and build on pushes and pull requests to `main`.
+GitHub Actions runs typecheck, lint, tests, build, and a Docker bridge smoke test on pushes and pull requests to `main`.
 
 ## Branch Protection
 

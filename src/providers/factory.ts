@@ -1,28 +1,42 @@
-import { getOptionalRuntimeConfig } from "../config.js";
+import { resolveOptionalRuntimeConfig } from "../lib/runtime-context.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { DeterministicProvider } from "./deterministic.js";
 import { AnthropicProvider } from "./anthropic.js";
 import { BifrostProvider } from "./bifrost.js";
+import { LMStudioProvider } from "./lmstudio.js";
 import { OllamaProvider } from "./ollama.js";
 import { OpenAIProvider } from "./openai.js";
+import { VllmProvider } from "./vllm.js";
 import type { ModelAnalysis, ModelProvider, StructuredEvidence } from "./base.js";
 
 let activeProvider: ModelProvider | null = null;
+let activeProviderKey: string | null = null;
 const fallbackProvider = new DeterministicProvider();
 
 export function resetProvider(): void {
   activeProvider = null;
+  activeProviderKey = null;
+}
+
+function providerCacheKey(): string {
+  const runtime = resolveOptionalRuntimeConfig();
+  return JSON.stringify({
+    type: runtime.provider.type,
+    endpoint: runtime.provider.endpoint,
+    modelName: runtime.provider.modelName,
+    apiKeyPresent: Boolean(runtime.provider.apiKey),
+  });
 }
 
 export function buildCandidate(): ModelProvider {
-  const runtime = getOptionalRuntimeConfig();
+  const runtime = resolveOptionalRuntimeConfig();
   switch (runtime.provider.type) {
     case "local-ollama":
-      return new BifrostProvider();
+      return new OllamaProvider();
     case "local-lmstudio":
-      return new BifrostProvider();
+      return new LMStudioProvider();
     case "local-vllm":
-      return new BifrostProvider();
+      return new VllmProvider();
     case "cloud-anthropic":
       return new AnthropicProvider();
     case "cloud-openai":
@@ -38,7 +52,8 @@ export function buildCandidate(): ModelProvider {
 }
 
 export async function getProvider(): Promise<ModelProvider> {
-  if (activeProvider) {
+  const cacheKey = providerCacheKey();
+  if (activeProvider && activeProviderKey === cacheKey) {
     return activeProvider;
   }
 
@@ -49,11 +64,12 @@ export async function getProvider(): Promise<ModelProvider> {
   }
 
   activeProvider = candidate;
+  activeProviderKey = cacheKey;
   return activeProvider;
 }
 
 export async function analyzeWithFallback(evidence: StructuredEvidence): Promise<ModelAnalysis> {
-  const runtime = getOptionalRuntimeConfig();
+  const runtime = resolveOptionalRuntimeConfig();
   const provider = await getProvider();
   try {
     return await provider.analyze(evidence);

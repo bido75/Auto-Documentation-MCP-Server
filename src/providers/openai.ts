@@ -1,5 +1,5 @@
 import OpenAI from "openai";
-import { getOptionalRuntimeConfig } from "../config.js";
+import { resolveOptionalRuntimeConfig } from "../lib/runtime-context.js";
 import { buildSharedPromptContent, type ModelAnalysis, type ModelProvider, type StructuredEvidence } from "./base.js";
 
 export class OpenAIProvider implements ModelProvider {
@@ -9,7 +9,7 @@ export class OpenAIProvider implements ModelProvider {
   private readonly client: OpenAI;
 
   constructor() {
-    const runtime = getOptionalRuntimeConfig();
+    const runtime = resolveOptionalRuntimeConfig();
     this.displayName = `OpenAI (${runtime.provider.modelName})`;
     const maybeBifrostHeaders = runtime.provider.endpoint.includes("bifrost")
       ? {
@@ -36,7 +36,7 @@ export class OpenAIProvider implements ModelProvider {
   }
 
   async analyze(ev: StructuredEvidence): Promise<ModelAnalysis> {
-    const runtime = getOptionalRuntimeConfig();
+    const runtime = resolveOptionalRuntimeConfig();
     const startedAt = Date.now();
     const response = await this.client.chat.completions.create({
       model: runtime.provider.modelName,
@@ -53,7 +53,7 @@ export class OpenAIProvider implements ModelProvider {
   }
 
   async embed(text: string): Promise<number[]> {
-    const runtime = getOptionalRuntimeConfig();
+    const runtime = resolveOptionalRuntimeConfig();
     const response = await this.client.embeddings.create({
       model: runtime.embedding.modelName || "text-embedding-3-small",
       input: text,

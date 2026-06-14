@@ -5,6 +5,7 @@ import { z } from "zod";
 import { buildCandidate, resetProvider } from "../providers/factory.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
+import { setRuntimeProviderConfig } from "../lib/runtime-context.js";
 import { storeApiKey } from "../installer/token-store.js";
 
 type ConfigureAiProviderInput = {
@@ -12,6 +13,7 @@ type ConfigureAiProviderInput = {
     endpoint?: string;
     apiKey?: string;
     modelName?: string;
+    persistToEnv?: boolean;
     runHealthCheck?: boolean;
     traceId?: string;
 };
@@ -51,29 +53,30 @@ export function registerConfigureAiProviderTool(server: McpServer): void {
         endpoint: z.string().optional(),
         apiKey: z.string().optional(),
         modelName: z.string().optional(),
+        persistToEnv: z.boolean().default(false),
         runHealthCheck: z.boolean().default(true),
         traceId: z.string().optional(),
-    }, async ({ providerType, endpoint, apiKey, modelName, runHealthCheck = true, traceId: incomingTraceId }: ConfigureAiProviderInput) => {
+    }, async ({ providerType, endpoint, apiKey, modelName, persistToEnv = false, runHealthCheck = true, traceId: incomingTraceId }: ConfigureAiProviderInput) => {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         try {
-            const envPath = join(process.cwd(), ".env");
-            const existing = await readFile(envPath, "utf8").catch(() => "");
-            const content = upsertEnvContents(existing, {
-                AI_PROVIDER_TYPE: providerType,
-                AI_ENDPOINT: endpoint,
-                AI_MODEL_NAME: modelName,
+            setRuntimeProviderConfig({
+                type: providerType,
+                endpoint,
+                apiKey,
+                modelName,
             });
-            await writeFile(envPath, content, "utf8");
-            process.env.AI_PROVIDER_TYPE = providerType;
-            if (endpoint) {
-                process.env.AI_ENDPOINT = endpoint;
-            }
-            if (modelName) {
-                process.env.AI_MODEL_NAME = modelName;
+            if (persistToEnv) {
+                const envPath = join(process.cwd(), ".env");
+                const existing = await readFile(envPath, "utf8").catch(() => "");
+                const content = upsertEnvContents(existing, {
+                    AI_PROVIDER_TYPE: providerType,
+                    AI_ENDPOINT: endpoint,
+                    AI_MODEL_NAME: modelName,
+                });
+                await writeFile(envPath, content, "utf8");
             }
             if (apiKey) {
-                process.env.AI_API_KEY = apiKey;
                 await storeApiKey(providerType, apiKey);
             }
             resetProvider();
@@ -85,7 +88,7 @@ export function registerConfigureAiProviderTool(server: McpServer): void {
                 stage: healthy ? "success" : "health_check_failed",
                 traceId,
                 message: healthy ? "Configured AI provider" : "Configured AI provider but health check failed",
-                data: { providerType, endpoint, modelName, durationMs: Date.now() - startedAt },
+                data: { providerType, endpoint, modelName, persisted: persistToEnv, durationMs: Date.now() - startedAt },
             });
             return {
                 content: [
@@ -96,6 +99,7 @@ export function registerConfigureAiProviderTool(server: McpServer): void {
                             providerType,
                             endpoint: endpoint ?? null,
                             modelName: modelName ?? null,
+                            persisted: persistToEnv,
                             healthy,
                             message: healthy
                                 ? `Provider ${providerType} is configured and ready.`

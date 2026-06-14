@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { redactSecrets } from "./redaction.js";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -37,14 +38,15 @@ export function logToolEvent(event: ToolLogEvent): void {
     return;
   }
 
+  const redactedData = event.data ? redactJsonValue(event.data) : undefined;
   const payload: Record<string, unknown> = {
     timestamp: new Date().toISOString(),
     level: event.level,
     tool: event.tool,
     stage: event.stage,
     traceId: event.traceId,
-    message: event.message,
-    ...(event.data ? { data: event.data } : {}),
+    message: redactSecrets(event.message),
+    ...(redactedData ? { data: redactedData } : {}),
   };
 
   const line = JSON.stringify(payload);
@@ -59,4 +61,29 @@ export function logToolEvent(event: ToolLogEvent): void {
   }
 
   console.error(line);
+}
+
+function isSecretKey(key: string): boolean {
+  return /token|secret|password|api[_-]?key|private[_-]?key|access[_-]?token|authorization/i.test(key);
+}
+
+function redactJsonValue(value: unknown, keyHint?: string): unknown {
+  if (keyHint && isSecretKey(keyHint) && value !== undefined && value !== null) {
+    return "[REDACTED]";
+  }
+
+  if (typeof value === "string") {
+    return redactSecrets(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => redactJsonValue(item));
+  }
+
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value).map(([key, item]) => [key, redactJsonValue(item, key)]);
+    return Object.fromEntries(entries);
+  }
+
+  return value;
 }

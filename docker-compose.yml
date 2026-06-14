@@ -72,7 +72,7 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,https://verdent.ai}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       AI_SESSION_WEBHOOK_SECRET: ${AI_SESSION_WEBHOOK_SECRET:-}
-      STATE_ENCRYPTION_KEY: ${STATE_ENCRYPTION_KEY:-change-this-for-self-hosted}
+      STATE_ENCRYPTION_KEY: ${STATE_ENCRYPTION_KEY:?Set STATE_ENCRYPTION_KEY to a unique high-entropy value before running production services}
     command: ["node", "build/src/cli/index.js", "bridge"]
     networks:
       - ai-mesh

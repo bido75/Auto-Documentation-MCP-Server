@@ -15,6 +15,7 @@ export interface OptionalRuntimeConfig {
   notionToken?: string;
   corsAllowedOrigins: string[];
   stateEncryptionKey: string;
+  artifactRoot: string;
   bifrostEndpoint: string;
   bifrostVirtualKey: string;
   provider: {
@@ -89,6 +90,39 @@ function envBool(key: string, fallback: boolean, env: NodeJS.ProcessEnv): boolea
   return value === "true";
 }
 
+export const DEFAULT_STATE_ENCRYPTION_KEY = "auto-doc-mcp-default-dev-key-change-me";
+
+const PLACEHOLDER_STATE_ENCRYPTION_KEYS = new Set([
+  DEFAULT_STATE_ENCRYPTION_KEY,
+  "change-this-for-self-hosted",
+  "change-this-to-a-random-32-char-string-in-production",
+]);
+
+export class ProductionSecretConfigError extends Error {
+  readonly code = "PRODUCTION_SECRET_CONFIG_INVALID";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProductionSecretConfigError";
+  }
+}
+
+export function assertProductionSecretConfig(env = process.env): void {
+  const nodeEnv = env.NODE_ENV?.trim().toLowerCase();
+  const runtimeMode = env.AUTO_DOC_RUNTIME_MODE?.trim().toLowerCase();
+  const productionLike = nodeEnv === "production" || runtimeMode === "runner" || runtimeMode === "bridge";
+  if (!productionLike) {
+    return;
+  }
+
+  const key = env.STATE_ENCRYPTION_KEY?.trim();
+  if (!key || PLACEHOLDER_STATE_ENCRYPTION_KEYS.has(key)) {
+    throw new ProductionSecretConfigError(
+      "STATE_ENCRYPTION_KEY must be set to a unique high-entropy value before running Auto-Doc in production, runner, or bridge mode.",
+    );
+  }
+}
+
 export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConfig {
   const bifrostVk = env.BIFROST_VIRTUAL_KEY?.trim() || "";
   return {
@@ -97,7 +131,8 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
-    stateEncryptionKey: envString("STATE_ENCRYPTION_KEY", "auto-doc-mcp-default-dev-key-change-me", env),
+    stateEncryptionKey: envString("STATE_ENCRYPTION_KEY", DEFAULT_STATE_ENCRYPTION_KEY, env),
+    artifactRoot: envString("AUTO_DOC_ARTIFACT_ROOT", ".auto-doc/artifacts", env),
     bifrostEndpoint: envString("BIFROST_ENDPOINT", "http://bifrost-gateway:8080", env),
     bifrostVirtualKey: bifrostVk,
     provider: {
@@ -153,6 +188,7 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
 }
 
 export function getRuntimeConfig(env = process.env): RuntimeConfig {
+  assertProductionSecretConfig(env);
   const runtime = getOptionalRuntimeConfig(env);
   assertNotionTokenPresent(runtime.notionToken);
   const resolvedNotionToken = runtime.notionToken as string;

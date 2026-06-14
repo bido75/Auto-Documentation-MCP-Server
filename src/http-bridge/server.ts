@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import cors from "cors";
 import express, { type Express, type Request, type Response } from "express";
-import { getOptionalRuntimeConfig } from "../config.js";
+import { assertProductionSecretConfig, getOptionalRuntimeConfig } from "../config.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { validateBifrostRouteConfig } from "../lib/bifrost-route-validation.js";
@@ -426,6 +426,7 @@ async function resolveRunnerTriggerInput(request: RunnerTriggerRequest): Promise
 }
 
 async function buildStartupPreflightSummary(host: string, port: number): Promise<StartupPreflightSummary> {
+  assertProductionSecretConfig();
   const runtime = getOptionalRuntimeConfig();
   const warnings: string[] = [];
   let candidateId = "deterministic";
@@ -1371,7 +1372,13 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
     });
   });
 
-  app.get("/runner/status", async (_req, res) => {
+  app.get("/runner/status", async (req, res) => {
+    const auth = resolveBridgeNotionToken(req);
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
+      return;
+    }
+
     try {
       const { targets, configurationError } = await buildRunnerStatusTargets();
       res.json({

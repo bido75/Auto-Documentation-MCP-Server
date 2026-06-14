@@ -265,6 +265,7 @@ function parseTool<T>(value: ToolResult): T {
 
 async function setupProject() {
   const stateDir = await mkdtemp(join(tmpdir(), "auto-doc-export-release-"));
+  process.env.AUTO_DOC_ARTIFACT_ROOT = stateDir;
   const store = new StateStore(join(stateDir, "state.json"));
   const notion = createFakeNotion();
 
@@ -359,6 +360,7 @@ afterEach(() => {
   delete process.env.AI_ENDPOINT;
   delete process.env.AI_MODEL_NAME;
   delete process.env.AI_API_KEY;
+  delete process.env.AUTO_DOC_ARTIFACT_ROOT;
 });
 
 describe("export and release tools", () => {
@@ -504,6 +506,7 @@ describe("export and release tools", () => {
           endpoint: "https://api.openai.test/v1",
           modelName: "gpt-test",
           apiKey: "secret-test-key",
+          persistToEnv: true,
           runHealthCheck: true,
         }),
       );

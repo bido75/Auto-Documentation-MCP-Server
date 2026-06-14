@@ -457,10 +457,13 @@ export class StateStore {
 }
 
 let sharedStore: StateStore | null = null;
+let sharedStorePath: string | null = null;
 
 export function getStateStore(): StateStore {
-  if (!sharedStore) {
-    sharedStore = new StateStore();
+  const configuredPath = process.env.AUTO_DOC_STATE_FILE?.trim() || ".auto-doc/state.json";
+  if (!sharedStore || sharedStorePath !== configuredPath) {
+    sharedStore = new StateStore(configuredPath);
+    sharedStorePath = configuredPath;
   }
 
   return sharedStore;
