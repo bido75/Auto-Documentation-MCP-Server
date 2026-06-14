@@ -1,0 +1,485 @@
+{
+  "generated_at": "2026-06-14T00:00:00-04:00",
+  "commit_sha": "457207c8930ead529fec7ffe9543492cc149d34d-dirty",
+  "runtime_modes": [
+    {
+      "mode": "stdio-mcp",
+      "entrypoint": "src/index.ts:45",
+      "launch": "node build/src/index.js or npm run dev",
+      "status": "real"
+    },
+    {
+      "mode": "runner",
+      "entrypoint": "src/index.ts:35",
+      "launch": "AUTO_DOC_RUNTIME_MODE=runner node build/src/index.js",
+      "status": "real"
+    },
+    {
+      "mode": "post-commit",
+      "entrypoint": "src/index.ts:40",
+      "launch": "node build/src/index.js post-commit",
+      "status": "real"
+    },
+    {
+      "mode": "http-sse-bridge",
+      "entrypoint": "src/cli/index.ts:11",
+      "launch": "node build/src/cli/index.js bridge",
+      "status": "real"
+    }
+  ],
+  "tools": [
+    {
+      "name": "initialize_project_manual",
+      "file": "src/server.ts:21",
+      "status": "real",
+      "purpose": "Create Notion project and manual databases."
+    },
+    {
+      "name": "capture_development_event",
+      "file": "src/server.ts:22",
+      "status": "real",
+      "purpose": "Persist development evidence snapshots."
+    },
+    {
+      "name": "analyze_documentation_candidate",
+      "file": "src/server.ts:23",
+      "status": "real",
+      "purpose": "Classify manual-worthiness and feature identity with provider-backed analyzer plus deterministic fallback."
+    },
+    {
+      "name": "upsert_feature_documentation",
+      "file": "src/server.ts:24",
+      "status": "real",
+      "purpose": "Write/update feature and manual entry pages."
+    },
+    {
+      "name": "publish_or_queue_review",
+      "file": "src/server.ts:25",
+      "status": "real",
+      "purpose": "Publish or queue entries based on confidence policy."
+    },
+    {
+      "name": "package_manual",
+      "file": "src/server.ts:26",
+      "status": "real",
+      "purpose": "Package manual content for releases."
+    },
+    {
+      "name": "run_autonomous_documentation_trigger",
+      "file": "src/server.ts:33",
+      "status": "real",
+      "purpose": "Run capture -> analyze -> author -> upsert -> publish."
+    },
+    {
+      "name": "assemble_manual",
+      "file": "src/server.ts:36",
+      "status": "real",
+      "purpose": "Assemble published entries into User/Admin manual pages."
+    },
+    {
+      "name": "configure_ai_provider",
+      "file": "src/server.ts:37",
+      "status": "real",
+      "purpose": "Set runtime provider config and health-check it."
+    },
+    {
+      "name": "export_manual_markdown",
+      "file": "src/server.ts:38",
+      "status": "real",
+      "purpose": "Export assembled manual as Markdown."
+    },
+    {
+      "name": "export_manual_pdf",
+      "file": "src/server.ts:39",
+      "status": "real",
+      "purpose": "Export assembled manual as PDF."
+    },
+    {
+      "name": "export_help_center_content",
+      "file": "src/server.ts:40",
+      "status": "real",
+      "purpose": "Export help-center JSON."
+    },
+    {
+      "name": "capture_feature_screenshot",
+      "file": "src/server.ts:35",
+      "status": "real",
+      "purpose": "Capture UI screenshots with SSRF/artifact guards."
+    },
+    {
+      "name": "attach_visual_evidence",
+      "file": "src/server.ts:34",
+      "status": "real",
+      "purpose": "Attach uploaded/captured visual evidence."
+    },
+    {
+      "name": "run_release_documentation_pipeline",
+      "file": "src/server.ts:44",
+      "status": "real",
+      "purpose": "Run release capture, changelog, assembly, package, PDF, sync, help export, and optional PR comment."
+    }
+  ],
+  "containers": [
+    {
+      "name": "postgres",
+      "image_or_build": "postgres:16-alpine (docker-compose.yml:4)",
+      "ports": [],
+      "networks": [
+        "ai-mesh"
+      ],
+      "env": [
+        "POSTGRES_DB",
+        "POSTGRES_USER",
+        "POSTGRES_PASSWORD"
+      ],
+      "purpose": "Bifrost database.",
+      "healthcheck": "pg_isready (docker-compose.yml:16)"
+    },
+    {
+      "name": "ollama",
+      "image_or_build": "ollama/ollama:latest (docker-compose.yml:23)",
+      "ports": [
+        "11434:11434"
+      ],
+      "networks": [
+        "ai-mesh"
+      ],
+      "env": [
+        "OLLAMA_KEEP_ALIVE",
+        "OLLAMA_NUM_PARALLEL",
+        "OLLAMA_MAX_LOADED_MODELS",
+        "OLLAMA_MAX_QUEUE"
+      ],
+      "purpose": "Local LLM server.",
+      "healthcheck": "none in compose"
+    },
+    {
+      "name": "notion-auto-doc",
+      "image_or_build": "build: Dockerfile (docker-compose.yml:48)",
+      "ports": [
+        "3000:3000"
+      ],
+      "networks": [
+        "ai-mesh"
+      ],
+      "env": [
+        "NOTION_TOKEN",
+        "AI_PROVIDER_TYPE",
+        "AI_ENDPOINT",
+        "AI_API_KEY",
+        "BIFROST_ENDPOINT",
+        "AI_MODEL_NAME",
+        "OPENROUTER_API_KEY",
+        "STATE_ENCRYPTION_KEY"
+      ],
+      "purpose": "Auto-Doc MCP HTTP/SSE bridge.",
+      "healthcheck": "GET /health through node fetch (docker-compose.yml:82)"
+    },
+    {
+      "name": "bifrost-gateway",
+      "image_or_build": "maximhq/bifrost:v1.5.6 (docker-compose.yml:89)",
+      "ports": [
+        "8080:8080"
+      ],
+      "networks": [
+        "ai-mesh"
+      ],
+      "env": [
+        "NODE_ENV",
+        "BIFROST_PORT",
+        "DATABASE_URL",
+        "BIFROST_PUBLIC_URL",
+        "BIFROST_BASE_URL",
+        "NOTION_TOKEN"
+      ],
+      "purpose": "Bifrost gateway and public UI/API.",
+      "healthcheck": "none in compose"
+    },
+    {
+      "name": "cloudflared",
+      "image_or_build": "cloudflare/cloudflared:latest (docker-compose.yml:121)",
+      "ports": [],
+      "networks": [
+        "ai-mesh"
+      ],
+      "env": [
+        "TUNNEL_TOKEN",
+        "CLOUDFLARE_TUNNEL_ID",
+        "CLOUDFLARE_BIFROST_HOSTNAME",
+        "CLOUDFLARE_MCP_HOSTNAME"
+      ],
+      "purpose": "Cloudflare tunnel for MCP and Bifrost hostnames.",
+      "healthcheck": "none in compose"
+    },
+    {
+      "name": "tailscale",
+      "image_or_build": "tailscale/tailscale:latest (docker-compose.yml:139)",
+      "ports": [],
+      "networks": [
+        "ai-mesh"
+      ],
+      "env": [
+        "TS_AUTHKEY",
+        "TS_STATE_DIR",
+        "TS_ROUTES"
+      ],
+      "purpose": "Private network sidecar.",
+      "healthcheck": "none in compose"
+    },
+    {
+      "name": "nginx",
+      "image_or_build": "nginx:alpine (docker-compose.yml:158)",
+      "ports": [
+        "80:80",
+        "443:443"
+      ],
+      "networks": [
+        "ai-mesh"
+      ],
+      "env": [],
+      "purpose": "Reverse proxy for Bifrost and Auto-Doc.",
+      "healthcheck": "none in compose"
+    }
+  ],
+  "network_edges": [
+    {
+      "from": "notion-auto-doc",
+      "to": "bifrost-gateway",
+      "via": "http://bifrost-gateway:8080/v1",
+      "reachable": "unverified",
+      "note": "Default AI_ENDPOINT points here; static reading does not verify live service health."
+    },
+    {
+      "from": "notion-auto-doc",
+      "to": "ollama",
+      "via": "http://ollama:11434",
+      "reachable": "unverified",
+      "note": "Shared Docker network exists, but app default does not target this URL."
+    },
+    {
+      "from": "bifrost-gateway",
+      "to": "postgres",
+      "via": "postgres:5432",
+      "reachable": "unverified",
+      "note": "DATABASE_URL uses postgres service name."
+    },
+    {
+      "from": "bifrost-gateway",
+      "to": "ollama",
+      "via": "unconfigured in checked-in bifrost-config.json",
+      "reachable": "unverified",
+      "note": "bifrost-config.json contains only schema, so route to Ollama is not proven."
+    },
+    {
+      "from": "nginx",
+      "to": "notion-auto-doc",
+      "via": "http://notion-auto-doc:3000",
+      "reachable": "unverified",
+      "note": "nginx upstream auto_doc uses notion-auto-doc:3000."
+    },
+    {
+      "from": "nginx",
+      "to": "bifrost-gateway",
+      "via": "http://bifrost-gateway:8080",
+      "reachable": "unverified",
+      "note": "nginx upstream bifrost uses bifrost-gateway:8080."
+    }
+  ],
+  "provider_chain": {
+    "factory": "src/providers/factory.ts:31",
+    "provider_types": [
+      {
+        "type": "local-ollama",
+        "constructs_class": "OllamaProvider",
+        "file": "src/providers/factory.ts:34"
+      },
+      {
+        "type": "local-lmstudio",
+        "constructs_class": "LMStudioProvider",
+        "file": "src/providers/factory.ts:36"
+      },
+      {
+        "type": "local-vllm",
+        "constructs_class": "VllmProvider",
+        "file": "src/providers/factory.ts:38"
+      },
+      {
+        "type": "cloud-anthropic",
+        "constructs_class": "AnthropicProvider",
+        "file": "src/providers/factory.ts:40"
+      },
+      {
+        "type": "cloud-openai/cloud-azure/cloud-gemini/cloud-groq",
+        "constructs_class": "OpenAIProvider",
+        "file": "src/providers/factory.ts:42"
+      },
+      {
+        "type": "bifrost",
+        "constructs_class": "BifrostProvider",
+        "file": "src/providers/factory.ts:47"
+      },
+      {
+        "type": "default/unknown",
+        "constructs_class": "DeterministicProvider",
+        "file": "src/providers/factory.ts:49"
+      }
+    ],
+    "config_resolution": [
+      {
+        "var": "AI_PROVIDER_TYPE",
+        "purpose": "Select provider type.",
+        "default": "bifrost",
+        "source": "src/config.ts:139"
+      },
+      {
+        "var": "AI_ENDPOINT",
+        "purpose": "Provider base URL.",
+        "default": "http://bifrost-gateway:8080/v1",
+        "source": "src/config.ts:140"
+      },
+      {
+        "var": "AI_API_KEY/OPENAI_API_KEY/OPENROUTER_API_KEY",
+        "purpose": "Primary provider API key precedence.",
+        "default": "undefined",
+        "source": "src/config.ts:141"
+      },
+      {
+        "var": "AI_MODEL_NAME",
+        "purpose": "Primary model name.",
+        "default": "openai/llama3.2:3b-instruct-q4_K_M",
+        "source": "src/config.ts:142"
+      },
+      {
+        "var": "OPENROUTER_ENDPOINT",
+        "purpose": "Cloud fallback endpoint config field.",
+        "default": "https://openrouter.ai/api/v1",
+        "source": "src/config.ts:147"
+      },
+      {
+        "var": "AI_FALLBACK_TO_DETERMINISTIC",
+        "purpose": "Allow deterministic fallback after provider failure.",
+        "default": "true",
+        "source": "src/config.ts:152"
+      }
+    ],
+    "local_llm": {
+      "configured_url": "Default app URL is http://bifrost-gateway:8080/v1; direct Ollama would require http://ollama:11434.",
+      "configured_model": "openai/llama3.2:3b-instruct-q4_K_M",
+      "container_actual": "ollama service at docker-compose.yml:22 publishing 11434:11434",
+      "reachable": "unverified",
+      "note": "Shared network exists, but checked-in Bifrost config does not show a route to Ollama."
+    },
+    "openrouter_fallback": {
+      "configured": false,
+      "trigger": "No automatic OpenRouter fallback trigger exists; analyzeWithFallback returns deterministic fallback.",
+      "key_wired": "partial",
+      "failure_logged_or_swallowed": "Provider analyze failures are logged; health-check fallback is silent."
+    },
+    "authoring_calls_llm": {
+      "verdict": "no",
+      "decision_branch": "src/lib/manual-author.ts:238",
+      "fallback_conditions": [
+        "Not applicable: authoring has no provider branch.",
+        "Analyzer provider output is removed at src/tools/analyze-documentation-candidate.ts:204.",
+        "Orchestrator calls authorManualSection without providerNarrative at src/orchestrator/auto-doc-orchestrator.ts:224."
+      ],
+      "inputs_passed": "real_source"
+    }
+  },
+  "failure_modes": [
+    {
+      "mode": "Manual authoring is deterministic by construction.",
+      "decided_at": "src/lib/manual-author.ts:238",
+      "how_to_detect": "Search manual-author imports/calls; no provider or analyzeWithFallback usage."
+    },
+    {
+      "mode": "Analyzer narratives are stripped.",
+      "decided_at": "src/tools/analyze-documentation-candidate.ts:204",
+      "how_to_detect": "Tool response omits generatedNarratives."
+    },
+    {
+      "mode": "Provider health-check failure silently uses deterministic fallback.",
+      "decided_at": "src/providers/factory.ts:61",
+      "how_to_detect": "ProviderUsed becomes deterministic without provider_factory fallback log."
+    },
+    {
+      "mode": "Provider analyze error uses deterministic fallback.",
+      "decided_at": "src/providers/factory.ts:76",
+      "how_to_detect": "Look for provider_factory fallback warning."
+    },
+    {
+      "mode": "OpenRouter expected but not implemented as fallback provider.",
+      "decided_at": "src/providers/factory.ts:90",
+      "how_to_detect": "Factory fallback returns DeterministicProvider."
+    },
+    {
+      "mode": "Compose default points to Bifrost, not direct Ollama.",
+      "decided_at": "docker-compose.yml:62",
+      "how_to_detect": "Inspect AI_ENDPOINT and Bifrost route config."
+    }
+  ],
+  "discrepancies": [
+    {
+      "claim": "Local LLM/OpenRouter is the brain for manual authoring.",
+      "reality": "Manual authoring never calls the provider.",
+      "evidence": "src/lib/manual-author.ts:238",
+      "severity": "high"
+    },
+    {
+      "claim": "OpenRouter is a fallback brain.",
+      "reality": "OpenRouter config exists but analyze fallback returns deterministic.",
+      "evidence": "src/providers/factory.ts:90",
+      "severity": "high"
+    },
+    {
+      "claim": "Docker local LLM is wired by default.",
+      "reality": "Ollama exists, but app default endpoint is Bifrost and Bifrost config is empty.",
+      "evidence": "docker-compose.yml:62",
+      "severity": "high"
+    },
+    {
+      "claim": "node build/src/cli/index.js runner starts runner mode.",
+      "reality": "CLI switch has setup/bridge/help only.",
+      "evidence": "src/cli/index.ts:7",
+      "severity": "medium"
+    },
+    {
+      "claim": "VS Code extension may be absent.",
+      "reality": "VS Code extension source exists.",
+      "evidence": "packages/vscode-extension/src/extension.ts:9",
+      "severity": "low"
+    }
+  ],
+  "open_decisions": [
+    {
+      "id": "authoring-provider-design",
+      "status": "open",
+      "note": "Decide whether authoring directly calls provider or consumes analyzer-generated narratives."
+    },
+    {
+      "id": "openrouter-fallback",
+      "status": "open",
+      "note": "Decide whether OpenRouter must be implemented as automatic fallback or only primary OpenAI-compatible endpoint."
+    },
+    {
+      "id": "bifrost-to-ollama-routing",
+      "status": "open",
+      "note": "Checked-in Bifrost config does not prove routing to Ollama."
+    },
+    {
+      "id": "vscode-keep-or-cut",
+      "status": "open",
+      "note": "VS Code extension exists in packages/vscode-extension; decide whether it is part of product scope."
+    },
+    {
+      "id": "dedupe-identity-model",
+      "status": "open",
+      "note": "Self-doc topic collapse indicates route/general feature keys are not enough."
+    }
+  ],
+  "bottom_line": {
+    "llm_actually_used_in_authoring": "no",
+    "most_likely_break_point": "src/orchestrator/auto-doc-orchestrator.ts:224 calls deterministic manual-author without providerNarrative; manual-author.ts has no provider call.",
+    "summary": "Analysis can use providers, but manual authoring is deterministic template assembly. The live self-doc run configured deterministic provider, and OpenRouter is not an automatic fallback."
+  }
+}
