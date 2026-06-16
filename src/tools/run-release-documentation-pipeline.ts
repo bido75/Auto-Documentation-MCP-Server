@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
+import { registerAssembleManualTool } from "./assemble-manual.js";
 import { registerExportManualPdfTool } from "./export-manual-pdf.js";
 import { registerExportHelpCenterContentTool } from "./export-help-center-content.js";
 import { registerGenerateReleaseChangelogTool } from "./generate-release-changelog.js";
@@ -65,6 +66,7 @@ export function registerRunReleaseDocumentationPipelineTool(server: McpServer) {
             const hostServer = host as unknown as McpServer;
             registerRunAutonomousDocumentationTriggerTool(hostServer);
             registerGenerateReleaseChangelogTool(hostServer);
+            registerAssembleManualTool(hostServer);
             registerPackageManualTool(hostServer);
             registerExportManualPdfTool(hostServer);
             registerSyncManualToLocalDocsTool(hostServer);
@@ -72,12 +74,13 @@ export function registerRunReleaseDocumentationPipelineTool(server: McpServer) {
             registerPublishPrCommentTool(hostServer);
             const runTrigger = host.handlers.get("run_autonomous_documentation_trigger");
             const generateChangelog = host.handlers.get("generate_release_changelog");
+            const assembleManual = host.handlers.get("assemble_manual");
             const packageManual = host.handlers.get("package_manual");
             const exportPdf = host.handlers.get("export_manual_pdf");
             const syncLocalDocs = host.handlers.get("sync_manual_to_local_docs");
             const exportHelpCenter = host.handlers.get("export_help_center_content");
             const publishPrComment = host.handlers.get("publish_pr_comment");
-            if (!runTrigger || !generateChangelog || !packageManual || !exportPdf || !syncLocalDocs || !exportHelpCenter || !publishPrComment) {
+            if (!runTrigger || !generateChangelog || !assembleManual || !packageManual || !exportPdf || !syncLocalDocs || !exportHelpCenter || !publishPrComment) {
                 throw new Error("Release pipeline could not resolve required tool handlers.");
             }
             const triggerResult = parseToolText(await runTrigger({
@@ -93,6 +96,10 @@ export function registerRunReleaseDocumentationPipelineTool(server: McpServer) {
             const changelogResult = parseToolText(await generateChangelog({
                 projectId,
                 releaseVersion,
+                traceId,
+            }));
+            const assembleResult = parseToolText(await assembleManual({
+                projectId,
                 traceId,
             }));
             const packageResult = parseToolText(await packageManual({
@@ -156,6 +163,7 @@ export function registerRunReleaseDocumentationPipelineTool(server: McpServer) {
                             releaseVersion,
                             trigger: triggerResult,
                             changelog: changelogResult,
+                            assemble: assembleResult,
                             package: packageResult,
                             pdf: pdfResult,
                             sync: syncResult,

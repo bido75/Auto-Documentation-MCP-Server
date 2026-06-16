@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -90,6 +90,7 @@ async function createAnalyzeFixture(): Promise<void> {
   const stateDir = await mkdtemp(join(tmpdir(), "auto-doc-provider-selection-"));
   const statePath = join(stateDir, "state.json");
   process.env.AUTO_DOC_STATE_FILE = statePath;
+  process.env.AUTO_DOC_TOKEN_DIR = join(stateDir, "tokens");
   const store = new StateStore(statePath);
   await store.upsertProject({
     projectId: "project_1",
@@ -134,6 +135,7 @@ async function handlers() {
 afterEach(() => {
   resetProvider();
   delete process.env.AUTO_DOC_STATE_FILE;
+  delete process.env.AUTO_DOC_TOKEN_DIR;
   delete process.env.AI_PROVIDER_TYPE;
   delete process.env.AI_ENDPOINT;
   delete process.env.AI_API_KEY;
@@ -160,6 +162,7 @@ describe("prove-real-provider-selection", () => {
           modelName: "test-model",
           runHealthCheck: false,
         });
+        expect(await readdir(process.env.AUTO_DOC_TOKEN_DIR!)).toContain("ai-local-lmstudio-api-key.dpapi");
         expect(buildCandidate()).toBeInstanceOf(LMStudioProvider);
 
         const result = JSON.parse(

@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
+import { registerAssembleManualTool } from "./assemble-manual.js";
 import { registerConfigureAiProviderTool } from "./configure-ai-provider.js";
 import { registerExportManualPdfTool } from "./export-manual-pdf.js";
 import { registerExportHelpCenterContentTool } from "./export-help-center-content.js";
@@ -15,6 +16,7 @@ import { registerSetRunnerFailureTriageMetadataTool } from "./set-runner-failure
 import { registerSyncManualToLocalDocsTool } from "./sync-manual-to-local-docs.js";
 
 export function registerExtraTools(server: McpServer) {
+  registerAssembleManualTool(server);
   registerConfigureAiProviderTool(server);
   registerExportManualPdfTool(server);
   registerExportHelpCenterContentTool(server);

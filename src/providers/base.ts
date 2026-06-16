@@ -39,15 +39,101 @@ export interface ModelAnalysis {
   generationMs: number;
 }
 
+export interface ManualAuthoringProviderInput {
+  audience: "User" | "Admin" | "Internal";
+  entryType: "User Guide" | "Admin Guide" | "Developer Note" | "Release Note";
+  featureName: string;
+  summary: string;
+  diffSummary?: string;
+  filesChanged: string[];
+  sourceText: string;
+}
+
+export interface ManualAuthoringProviderResult {
+  body: string;
+  providerUsed: string;
+  generationMs: number;
+}
+
 export interface ModelProvider {
   readonly id: string;
   readonly displayName: string;
   readonly supportsEmbeddings: boolean;
   analyze(evidence: StructuredEvidence): Promise<ModelAnalysis>;
+  authorManualSection?(input: ManualAuthoringProviderInput): Promise<ManualAuthoringProviderResult>;
   embed?(text: string): Promise<number[]>;
   healthCheck(): Promise<boolean>;
 }
 
 export function buildSharedPromptContent(ev: StructuredEvidence): string {
-  return `Analyze this software change and produce structured JSON documentation.\n\nCHANGE CONTEXT:\n- Branch: ${ev.branch}\n- Commit: ${ev.commitMessage}\n- PR Title: ${ev.prTitle ?? "N/A"}\n- Files Changed: ${ev.filesChanged.slice(0, 20).join(", ") || "none"}\n- Routes/URLs: ${ev.routes.join(", ") || "none"}\n- API Endpoints: ${ev.apiEndpoints.join(", ") || "none"}\n- Environment Variables: ${ev.envVars.join(", ") || "none"}\n- DB Migrations: ${ev.dbMigrations.join(", ") || "none"}\n- UI Components: ${ev.uiComponents.join(", ") || "none"}\n- Auth Patterns: ${ev.authPatterns.join(", ") || "none"}\n- Tests: ${ev.testStatus}\n- Diff Summary: ${ev.diffSummary.slice(0, 2000)}\n`;
+  return `Analyze this software change and produce structured JSON documentation.
+
+Return only valid JSON with this exact shape:
+{
+  "featureName": "short human-readable feature name",
+  "featureKey": "stable-kebab-case-feature-key",
+  "shouldDocument": true,
+  "audiences": ["User", "Admin"],
+  "userGuide": {
+    "summary": "novice-readable overview of what the user can now do",
+    "steps": ["ordered user action step"],
+    "expectedOutcome": "what success looks like",
+    "possibleErrors": ["likely user-facing failure and fix"]
+  },
+  "adminGuide": {
+    "configRequired": ["operator requirement"],
+    "endpointsAffected": ["route or endpoint, or empty array"],
+    "envVarsRequired": ["REAL_ENV_VAR_NAME, or empty array"],
+    "verificationSteps": ["operator verification step"],
+    "troubleshooting": ["operator failure and fix"]
+  },
+  "developerNotes": "optional implementation note",
+  "confidenceScore": 75,
+  "confidenceReasons": ["why this is manual-worthy"],
+  "reviewQuestions": []
+}
+
+Do not return metadata-only analysis. Do not invent environment variables; use only real names from the change context.
+
+CHANGE CONTEXT:
+- Branch: ${ev.branch}
+- Commit: ${ev.commitMessage}
+- PR Title: ${ev.prTitle ?? "N/A"}
+- Files Changed: ${ev.filesChanged.slice(0, 20).join(", ") || "none"}
+- Routes/URLs: ${ev.routes.join(", ") || "none"}
+- API Endpoints: ${ev.apiEndpoints.join(", ") || "none"}
+- Environment Variables: ${ev.envVars.join(", ") || "none"}
+- DB Migrations: ${ev.dbMigrations.join(", ") || "none"}
+- UI Components: ${ev.uiComponents.join(", ") || "none"}
+- Auth Patterns: ${ev.authPatterns.join(", ") || "none"}
+- Tests: ${ev.testStatus}
+- Diff Summary: ${ev.diffSummary.slice(0, 2000)}
+`;
+}
+
+export function buildManualAuthoringPrompt(input: ManualAuthoringProviderInput): string {
+  return `Write one complete ${input.entryType} section for a ${input.audience} audience.
+
+Return only valid JSON with this shape:
+{
+  "body": "markdown manual content"
+}
+
+Authoring requirements:
+- Write clear novice-readable documentation, not an evidence log.
+- Include a short overview, prerequisites or requirements, ordered steps, expected result, and troubleshooting.
+- Use real commands, environment variable names, and operational details from the source context when available.
+- Do not invent screenshots, deployed URLs, credentials, or product behavior not supported by the source.
+- Do not include raw README dumps, commit summaries, "Source context", or file lists as the manual.
+- Keep user-facing and admin-facing content distinct.
+
+Subject:
+- Feature: ${input.featureName}
+- Summary: ${input.summary}
+- Files changed: ${input.filesChanged.slice(0, 40).join(", ") || "none"}
+- Diff summary: ${(input.diffSummary ?? "").slice(0, 2500)}
+
+Source context:
+${input.sourceText.slice(0, 12000)}
+`;
 }

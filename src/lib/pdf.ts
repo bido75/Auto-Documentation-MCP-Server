@@ -10,6 +10,17 @@ function escapeHtml(input: string): string {
     .replaceAll("'", "&#39;");
 }
 
+function renderInlineMarkdownImage(trimmed: string): string | null {
+  const match = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/);
+  if (!match) {
+    return null;
+  }
+
+  const alt = escapeHtml(match[1]);
+  const src = escapeHtml(match[2]);
+  return `<figure><img src="${src}" alt="${alt}" /><figcaption>${alt}</figcaption></figure>`;
+}
+
 function markdownToHtml(markdown: string): string {
   const lines = markdown.split(/\r?\n/);
   const output: string[] = [];
@@ -31,6 +42,12 @@ function markdownToHtml(markdown: string): string {
         inList = true;
       }
       output.push(`<li>${escapeHtml(trimmed.slice(2))}</li>`);
+      continue;
+    }
+
+    const image = renderInlineMarkdownImage(trimmed);
+    if (image) {
+      output.push(image);
       continue;
     }
 
@@ -87,6 +104,21 @@ function renderHtmlDocument(title: string, markdown: string): string {
       }
       ul {
         margin-top: 0;
+      }
+      figure {
+        margin: 14px 0;
+        page-break-inside: avoid;
+      }
+      img {
+        display: block;
+        max-width: 100%;
+        height: auto;
+        border: 1px solid #d1d5db;
+      }
+      figcaption {
+        font-size: 11px;
+        color: #4b5563;
+        margin-top: 4px;
       }
     </style>
   </head>

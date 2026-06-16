@@ -54,7 +54,7 @@ function parseToolResult<T>(value: { content: Array<{ type: string; text: string
 }
 
 describe("analyze_documentation_candidate fallback", () => {
-  it("captures analyzer failures as a Notion manual entry with Captured status", async () => {
+  it("surfaces analyzer failures without creating a Captured fallback manual entry", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "auto-doc-analyze-fallback-"));
     testContext.store = new StateStore(join(stateDir, "state.json"));
 
@@ -110,21 +110,11 @@ describe("analyze_documentation_candidate fallback", () => {
 
     expect(result.shouldDocument).toBe(false);
     expect(result.confidenceScore).toBe(0);
-    expect(result.fallbackStatus).toBe("Captured");
-    expect(result.fallbackEntryId).toBe("manual_fallback_1");
-    expect(result.fallbackReasonCode).toBe("analyzer_exception_fallback_persisted");
+    expect(result.fallbackStatus).toBeNull();
+    expect(result.fallbackEntryId).toBeNull();
+    expect(result.fallbackReasonCode).toBe("analyzer_exception");
     expect(result.confidenceReasons.join(" ")).toContain("Analyzer failed");
-
-    expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        parent: { database_id: "db_manual" },
-        properties: expect.objectContaining({
-          Status: { status: { name: "Captured" } },
-          "Publishing Decision": { select: { name: "Queued Review" } },
-          Project: { relation: [{ id: "project_page_1" }] },
-        }),
-      }),
-    );
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("returns a deterministic fallback reason code when no usable evidence exists", async () => {

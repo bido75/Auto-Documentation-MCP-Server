@@ -3,22 +3,38 @@ import { z } from "zod";
 import { scoreDocumentationConfidence } from "../analysis/confidence.js";
 import { createFeatureKey } from "../analysis/feature-key.js";
 import { classifyManualWorthiness } from "../analysis/manual-worthiness.js";
-import { analyzeDocumentationCandidate } from "../lib/analyzer.js";
-import { createNotionClient } from "../lib/notion-client.js";
+import { analyzeDocumentationCandidate, ProviderOutputInvalidError } from "../lib/analyzer.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
-import { runProjectPreflight } from "../lib/notion-preflight.js";
-import { withNotionRetry } from "../lib/notion-retry.js";
-import type { EventSnapshot, ProjectState } from "../lib/state-store.js";
+import type { EventSnapshot } from "../lib/state-store.js";
 import type { AnalyzeDocumentationCandidateResult, AnalyzeFallbackReasonCode, EntryType } from "../types.js";
 import { getStateStore } from "../lib/state-store.js";
 
 const FALLBACK_REASON_CODES: Record<string, AnalyzeFallbackReasonCode> = {
   NONE: "none",
   NO_USABLE_EVIDENCE: "no_usable_evidence",
-  ANALYZER_EXCEPTION_PERSISTED: "analyzer_exception_fallback_persisted",
-  ANALYZER_EXCEPTION_PERSIST_FAILED: "analyzer_exception_fallback_persist_failed",
+  PROVIDER_OUTPUT_INVALID: "provider_output_invalid",
+  ANALYZER_EXCEPTION: "analyzer_exception",
 };
+
+function fallbackGeneratedNarratives(providerUsed: string) {
+  return {
+    providerUsed,
+    userGuide: {
+      summary: "",
+      steps: [] as string[],
+      expectedOutcome: "",
+      possibleErrors: [] as string[],
+    },
+    adminGuide: {
+      configRequired: [] as string[],
+      endpointsAffected: [] as string[],
+      envVarsRequired: [] as string[],
+      verificationSteps: [] as string[],
+      troubleshooting: [] as string[],
+    },
+  };
+}
 
 function toTitleCase(input: string): string {
   return input
@@ -80,50 +96,6 @@ function inferTestsPassed(testStatuses: Array<string | undefined>, eventTypes: s
   return testStatuses.includes("passed") || eventTypes.includes("tests_passed");
 }
 
-async function persistCapturedAnalyzerFallback(input: {
-  project: ProjectState;
-  evidence: EventSnapshot[];
-  featureName: string;
-  errorMessage: string;
-}) {
-  const notion = createNotionClient();
-  await runProjectPreflight({ notion, project: input.project });
-  const firstCommit = input.evidence.find((item) => item.commitSha)?.commitSha;
-  const filesChanged = input.evidence.flatMap((item) => item.filesChanged).filter(Boolean);
-
-  const payload = {
-    parent: { database_id: input.project.databases.manualEntriesDatabaseId },
-    properties: {
-      "Entry Title": { title: [{ text: { content: `Captured: ${input.featureName}` } }] },
-      "Entry Type": { select: { name: "Developer Note" } },
-      Audience: { select: { name: "Internal" } },
-      Status: { status: { name: "Captured" } },
-      "Confidence Score": { number: 0 },
-      "Publishing Decision": { select: { name: "Queued Review" } },
-      "Reviewer Notes": {
-        rich_text: [{ text: { content: `Analyzer failure fallback: ${input.errorMessage.slice(0, 1000)}` } }],
-      },
-      ...(firstCommit ? { "Source Commit": { rich_text: [{ text: { content: firstCommit } }] } } : {}),
-      ...(filesChanged.length > 0
-        ? {
-            "Files Changed": {
-              rich_text: [{ text: { content: filesChanged.join("\n").slice(0, 1800) } }],
-            },
-          }
-        : {}),
-      "Date Captured": { date: { start: new Date().toISOString().slice(0, 10) } },
-      Project: { relation: [{ id: input.project.projectPageId ?? input.project.projectId }] },
-    },
-  };
-
-  const page = await withNotionRetry(() => notion.pages.create(payload as never), {
-    operationName: "pages.create",
-    payload,
-  });
-
-  return page.id;
-}
-
 export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
   server.tool(
     "analyze_documentation_candidate",
@@ -171,6 +143,7 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
           fallbackStatus: "Captured",
           fallbackEntryId: null,
           fallbackReasonCode: FALLBACK_REASON_CODES.NO_USABLE_EVIDENCE,
+          generatedNarratives: fallbackGeneratedNarratives("deterministic"),
         };
 
           logToolEvent({
@@ -202,11 +175,16 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
             existingFeatureKeys: input.existingFeatureKeys,
           });
           const {
-            generatedNarratives: _generatedNarratives,
             dedupeDecision: _dedupeDecision,
             matchedExistingFeatureKey: _matchedExistingFeatureKey,
             ...response
           } = analysis;
+          const responseWithNarratives = {
+            ...response,
+            generatedNarratives: response.generatedNarratives ?? fallbackGeneratedNarratives(
+              response.confidenceReasons.find((reason) => reason.startsWith("Provider used: "))?.replace("Provider used: ", "") ?? "deterministic",
+            ),
+          };
 
         logToolEvent({
           level: "info",
@@ -216,11 +194,56 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
           message: "Analyzed documentation candidate",
           data: {
             projectId: input.projectId,
-            shouldDocument: response.shouldDocument,
-            confidenceScore: response.confidenceScore,
+            shouldDocument: responseWithNarratives.shouldDocument,
+            confidenceScore: responseWithNarratives.confidenceScore,
             durationMs: Date.now() - startedAt,
           },
         });
+
+          return {
+            content: [
+              {
+                  type: "text",
+                  text: JSON.stringify({ ...responseWithNarratives, traceId }, null, 2),
+                },
+              ],
+            };
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Unknown analyzer failure.";
+        if (error instanceof ProviderOutputInvalidError) {
+          const response: AnalyzeDocumentationCandidateResult = {
+            shouldDocument: false,
+            featureKey: "general:provider-output-invalid",
+            featureName,
+            audiences: [],
+            entryTypes: [],
+            confidenceScore: 0,
+            confidenceReasons: [
+              "Provider output invalid; topic was not persisted as a Captured fallback shell.",
+              `Provider output error: ${errorMessage}`,
+            ],
+            reviewQuestions: [
+              "Did the provider return the required analyzer JSON schema?",
+              "Should the provider be retried with a stricter schema prompt?",
+            ],
+            fallbackStatus: null,
+            fallbackEntryId: null,
+            fallbackReasonCode: FALLBACK_REASON_CODES.PROVIDER_OUTPUT_INVALID,
+            generatedNarratives: fallbackGeneratedNarratives("provider_output_invalid"),
+          };
+
+          logToolEvent({
+            level: "error",
+            tool: "analyze_documentation_candidate",
+            stage: "provider_output_invalid",
+            traceId,
+            message: "Provider output invalid; returning visible failure response",
+            data: {
+              projectId: input.projectId,
+              fallbackReasonCode: response.fallbackReasonCode,
+              durationMs: Date.now() - startedAt,
+            },
+          });
 
           return {
             content: [
@@ -230,22 +253,7 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
               },
             ],
           };
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : "Unknown analyzer failure.";
-        let fallbackEntryId: string | undefined;
-        let fallbackPersistenceError: string | undefined;
-
-        try {
-          fallbackEntryId = await persistCapturedAnalyzerFallback({
-            project,
-            evidence,
-            featureName,
-            errorMessage,
-          });
-        } catch (persistError) {
-          fallbackPersistenceError = persistError instanceof Error ? persistError.message : String(persistError);
         }
-
         const response: AnalyzeDocumentationCandidateResult = {
           shouldDocument: false,
           featureKey: "general:captured-feature-update",
@@ -254,33 +262,28 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
           entryTypes: [],
           confidenceScore: 0,
           confidenceReasons: [
-            "Analyzer failed; signal captured as a manual entry with status Captured.",
+            "Analyzer failed; topic was not persisted as a Captured fallback shell.",
             `Analyzer error: ${errorMessage}`,
-            ...(fallbackPersistenceError
-              ? [`Fallback persistence failed: ${fallbackPersistenceError}`]
-              : ["Fallback persistence succeeded."]),
           ],
           reviewQuestions: [
             "What changed functionally for users or admins?",
             "Should this captured signal be promoted to a full manual entry?",
           ],
-          fallbackStatus: "Captured",
-          fallbackEntryId: fallbackEntryId ?? null,
-          fallbackReasonCode: fallbackPersistenceError
-            ? FALLBACK_REASON_CODES.ANALYZER_EXCEPTION_PERSIST_FAILED
-            : FALLBACK_REASON_CODES.ANALYZER_EXCEPTION_PERSISTED,
+          fallbackStatus: null,
+          fallbackEntryId: null,
+          fallbackReasonCode: FALLBACK_REASON_CODES.ANALYZER_EXCEPTION,
+          generatedNarratives: fallbackGeneratedNarratives("analyzer_exception"),
         };
 
         logToolEvent({
-          level: fallbackPersistenceError ? "error" : "warn",
+          level: "error",
           tool: "analyze_documentation_candidate",
-          stage: "fallback_analyzer_failure",
+          stage: "analyzer_exception",
           traceId,
-          message: "Analyzer failed; returning fallback response",
+          message: "Analyzer failed; returning visible failure response",
           data: {
             projectId: input.projectId,
             fallbackReasonCode: response.fallbackReasonCode,
-            fallbackEntryId: response.fallbackEntryId,
             durationMs: Date.now() - startedAt,
           },
         });

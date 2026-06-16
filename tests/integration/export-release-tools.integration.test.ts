@@ -555,6 +555,8 @@ describe("export and release tools", () => {
     expect(result.sync.outputPath).toContain("release.md");
     expect(result.helpCenter.articleCount).toBeGreaterThanOrEqual(1);
     expect(Array.from(notion._pages.values()).filter((page) => page.parent.database_id === "events_db")).toHaveLength(1);
+    const assembledManualPages = Array.from(notion._pages.values()).filter((page) => "page_id" in page.parent);
+    expect(assembledManualPages.map((page) => textFromTitle(page.properties.title)).sort()).toEqual(["Admin Manual", "User Manual"]);
   }, 20_000);
 
   it("reports runner release automation status and health summary", async () => {

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { registerAnalyzeDocumentationCandidateTool } from "./tools/analyze-documentation-candidate.js";
+import { registerAttachVisualEvidenceTool } from "./tools/attach-visual-evidence.js";
 import { registerCaptureDevelopmentEventTool } from "./tools/capture-development-event.js";
 import { registerCaptureFeatureScreenshotTool } from "./tools/capture-feature-screenshot.js";
 import { registerExportManualMarkdownTool } from "./tools/export-manual-markdown.js";
@@ -30,7 +31,9 @@ export const REGISTERED_TOOL_NAMES = [
   "get_runner_release_automation_status",
   "set_runner_failure_triage_metadata",
   "run_autonomous_documentation_trigger",
+  "attach_visual_evidence",
   "capture_feature_screenshot",
+  "assemble_manual",
   "configure_ai_provider",
   "export_manual_markdown",
   "export_manual_pdf",
@@ -56,6 +59,7 @@ export function createServer() {
   registerPackageManualTool(server);
   registerGetDocumentationStatusTool(server);
   registerGetGitDiffSummaryTool(server);
+  registerAttachVisualEvidenceTool(server);
   registerCaptureFeatureScreenshotTool(server);
   registerExportManualMarkdownTool(server);
   registerExtraTools(server);

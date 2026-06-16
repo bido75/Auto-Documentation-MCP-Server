@@ -41,6 +41,10 @@ export interface OptionalRuntimeConfig {
     similarityThreshold: number;
     indexPath: string;
   };
+  authoring: {
+    dedicatedEnabled: boolean;
+    maxConcurrent: number;
+  };
   publishing: {
     mode: string;
     autoPublishThreshold: number;
@@ -159,6 +163,10 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
       modelName: envString("EMBEDDING_MODEL", "nomic-embed-text", env),
       similarityThreshold: envFloat("EMBEDDING_SIMILARITY_THRESHOLD", 0.92, env),
       indexPath: envString("EMBEDDING_INDEX_PATH", ".auto-doc-mcp/embeddings.json", env),
+    },
+    authoring: {
+      dedicatedEnabled: envBool("AUTO_DOC_DEDICATED_AUTHORING_ENABLED", true, env),
+      maxConcurrent: Math.max(1, envInt("AUTO_DOC_AUTHORING_MAX_CONCURRENT", 2, env)),
     },
     publishing: {
       mode: envString("PUBLISHING_MODE", "balanced", env),

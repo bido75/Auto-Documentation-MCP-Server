@@ -69,6 +69,7 @@
         "fallbackStatus",
         "featureKey",
         "featureName",
+        "generatedNarratives",
         "reviewQuestions",
         "shouldDocument",
         "traceId"
@@ -109,6 +110,90 @@
         },
         "featureName": {
           "type": "string"
+        },
+        "generatedNarratives": {
+          "type": "object",
+          "required": [
+            "adminGuide",
+            "providerUsed",
+            "userGuide"
+          ],
+          "properties": {
+            "adminGuide": {
+              "type": "object",
+              "required": [
+                "configRequired",
+                "endpointsAffected",
+                "envVarsRequired",
+                "troubleshooting",
+                "verificationSteps"
+              ],
+              "properties": {
+                "configRequired": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "endpointsAffected": {
+                  "type": "array",
+                  "items": {
+                    "type": "unknown"
+                  }
+                },
+                "envVarsRequired": {
+                  "type": "array",
+                  "items": {
+                    "type": "unknown"
+                  }
+                },
+                "troubleshooting": {
+                  "type": "array",
+                  "items": {
+                    "type": "unknown"
+                  }
+                },
+                "verificationSteps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "providerUsed": {
+              "type": "string"
+            },
+            "userGuide": {
+              "type": "object",
+              "required": [
+                "expectedOutcome",
+                "possibleErrors",
+                "steps",
+                "summary"
+              ],
+              "properties": {
+                "expectedOutcome": {
+                  "type": "string"
+                },
+                "possibleErrors": {
+                  "type": "array",
+                  "items": {
+                    "type": "unknown"
+                  }
+                },
+                "steps": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "summary": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         },
         "reviewQuestions": {
           "type": "array",

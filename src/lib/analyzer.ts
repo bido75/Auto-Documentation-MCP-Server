@@ -33,6 +33,240 @@ type FeatureKeyResolution = {
   matchedExistingFeatureKey?: string | null;
 };
 
+export class ProviderOutputInvalidError extends Error {
+  readonly code = "provider_output_invalid";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProviderOutputInvalidError";
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function numberValue(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function booleanValue(value: unknown, fallback: boolean): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function readBoolean(source: Record<string, unknown>, keys: string[], fallback: boolean): boolean {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "boolean") {
+      return value;
+    }
+  }
+  return fallback;
+}
+
+function readNumber(source: Record<string, unknown>, keys: string[], fallback: number): number {
+  for (const key of keys) {
+    const value = source[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return fallback;
+}
+
+function readRecord(source: Record<string, unknown>, keys: string[]): Record<string, unknown> | null {
+  for (const key of keys) {
+    const value = source[key];
+    if (isRecord(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+function readString(source: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = stringValue(source[key]);
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function splitList(value: string): string[] {
+  return value
+    .split(/\r?\n|[,;]/)
+    .map((item) => item.replace(/^\s*(?:[-*]|\d+\.)\s*/, "").trim())
+    .filter(Boolean);
+}
+
+function readStringList(source: Record<string, unknown>, keys: string[]): string[] {
+  for (const key of keys) {
+    const value = source[key];
+    if (Array.isArray(value)) {
+      const items = value
+        .map((item) => (typeof item === "string" ? item : isRecord(item) ? readString(item, ["text", "step", "description", "name"]) : ""))
+        .filter(Boolean);
+      if (items.length > 0) {
+        return items;
+      }
+    }
+    const text = stringValue(value);
+    if (text) {
+      return splitList(text);
+    }
+  }
+  return [];
+}
+
+function readFirstStringFromSources(sources: Record<string, unknown>[], keys: string[]): string {
+  for (const source of sources) {
+    const value = readString(source, keys);
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+}
+
+function readFirstListFromSources(sources: Record<string, unknown>[], keys: string[]): string[] {
+  for (const source of sources) {
+    const value = readStringList(source, keys);
+    if (value.length > 0) {
+      return value;
+    }
+  }
+  return [];
+}
+
+function valuesAsList(source: Record<string, unknown> | null): string[] {
+  if (!source) {
+    return [];
+  }
+  return Object.values(source)
+    .map((value) => {
+      if (typeof value === "string") {
+        return value.trim();
+      }
+      if (Array.isArray(value)) {
+        return value.filter((item): item is string => typeof item === "string").join("; ").trim();
+      }
+      return "";
+    })
+    .filter(Boolean);
+}
+
+function normalizeAudiences(value: unknown): ModelAnalysis["audiences"] {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? splitList(value) : [];
+  const audiences = new Set<ModelAnalysis["audiences"][number]>();
+  for (const item of raw) {
+    const normalized = String(item).trim().toLowerCase();
+    if (normalized === "user" || normalized === "users") audiences.add("User");
+    if (normalized === "admin" || normalized === "administrator" || normalized === "operators") audiences.add("Admin");
+    if (normalized === "developer" || normalized === "developers") audiences.add("Developer");
+    if (normalized === "support") audiences.add("Support");
+  }
+  return [...audiences];
+}
+
+function normalizeProviderOutput(raw: unknown, structuredEvidence: StructuredEvidence, inferredFeatureName: string): { analysis: ModelAnalysis; repairs: string[] } {
+  if (!isRecord(raw)) {
+    throw new ProviderOutputInvalidError("Provider output was not a JSON object.");
+  }
+
+  const userGuide = readRecord(raw, ["userGuide", "user_guide", "user", "userManual", "user_manual"]);
+  const adminGuide = readRecord(raw, ["adminGuide", "admin_guide", "admin", "adminManual", "admin_manual"]);
+  const configuration = readRecord(raw, ["configuration", "config", "settings"]);
+  const workflowArchitecture = readRecord(raw, ["workflow_architecture", "workflowArchitecture", "workflow", "architecture"]);
+  const technicalAnalysis = readRecord(raw, ["technical_analysis", "technicalAnalysis", "analysis"]);
+  const implementationDetails = readRecord(raw, ["implementationDetails", "implementation_details"]);
+  const impactAssessment = readRecord(raw, ["impact_assessment", "impactAssessment"]);
+  const userSources = [
+    userGuide,
+    raw,
+    workflowArchitecture,
+    technicalAnalysis,
+    implementationDetails,
+    impactAssessment,
+  ].filter(isRecord);
+  const hasTopLevelUserFields = Boolean(
+    readFirstStringFromSources(userSources, ["summary", "overview", "description", "change_summary", "diffSummary", "diff_summary", "objective"]) ||
+      readFirstListFromSources(userSources, ["steps", "stepByStep", "instructions", "procedure", "workflow_pipeline", "workflowPipeline", "pipeline", "pipeline_steps", "pipelineSteps"]).length > 0,
+  );
+  if (!userGuide && !adminGuide && !hasTopLevelUserFields) {
+    throw new ProviderOutputInvalidError("Provider output did not include a repairable userGuide or adminGuide object.");
+  }
+
+  const adminSource = adminGuide ?? configuration ?? {};
+  const userSummary =
+    readFirstStringFromSources(userSources, ["summary", "overview", "description", "change_summary", "diffSummary", "diff_summary", "objective"]) ||
+    structuredEvidence.commitMessage;
+  const explicitUserSteps = readFirstListFromSources(userSources, [
+    "steps",
+    "stepByStep",
+    "instructions",
+    "procedure",
+    "workflow_pipeline",
+    "workflowPipeline",
+    "pipeline",
+    "pipeline_steps",
+    "pipelineSteps",
+    "affected_modules",
+    "affectedModules",
+    "securityConsiderations",
+  ]);
+  const userSteps = explicitUserSteps.length > 0 ? explicitUserSteps : valuesAsList(implementationDetails);
+  const expectedOutcome =
+    readFirstStringFromSources(userSources, ["expectedOutcome", "expected_outcome", "expectedResult", "expected_result", "result", "outcome", "success"]) ||
+    `The ${inferredFeatureName} workflow completes successfully.`;
+
+  if (!userSummary || userSteps.length === 0) {
+    throw new ProviderOutputInvalidError("Provider output could not be repaired into a user guide with summary and steps.");
+  }
+
+  const adminEnvVars = readStringList(adminSource, ["envVarsRequired", "envVars", "environmentVariables", "environment_variables", "env", "configuration"]);
+  const repaired: ModelAnalysis = {
+    featureName: readString(raw, ["featureName", "feature_name", "feature", "title", "name"]) || inferredFeatureName,
+    featureKey: readString(raw, ["featureKey", "feature_key", "key"]) || createFeatureKey({ featureName: inferredFeatureName }),
+    shouldDocument: readBoolean(raw, ["shouldDocument", "should_document"], true),
+    audiences: normalizeAudiences(raw.audiences).length > 0 ? normalizeAudiences(raw.audiences) : ["User", ...(Object.keys(adminSource).length > 0 ? ["Admin" as const] : [])],
+    userGuide: {
+      summary: userSummary,
+      steps: userSteps,
+      expectedOutcome,
+      possibleErrors: readFirstListFromSources(userSources, ["possibleErrors", "possible_errors", "errors", "troubleshooting", "failureModes", "failure_modes", "risk_assessment"]),
+    },
+    adminGuide: {
+      configRequired: readStringList(adminSource, ["configRequired", "requirements", "configuration", "setup"]),
+      endpointsAffected: readStringList(adminSource, ["endpointsAffected", "endpoints", "routes", "apiEndpoints"]),
+      envVarsRequired: adminEnvVars,
+      verificationSteps: readStringList(adminSource, ["verificationSteps", "verify", "validation", "checks"]),
+      troubleshooting: readStringList(adminSource, ["troubleshooting", "errors", "failureModes"]),
+    },
+    developerNotes: readString(raw, ["developerNotes", "developer_notes", "implementationNotes"]) || undefined,
+    confidenceScore: readNumber(raw, ["confidenceScore", "confidence_score"], 65),
+    confidenceReasons: readStringList(raw, ["confidenceReasons", "confidence_reasons", "reasons"]).length > 0 ? readStringList(raw, ["confidenceReasons", "confidence_reasons", "reasons"]) : ["Provider output repaired into analyzer schema."],
+    reviewQuestions: readStringList(raw, ["reviewQuestions", "review_questions", "questions"]),
+    providerUsed: readString(raw, ["providerUsed", "provider_used", "provider"]) || "unknown-provider",
+    generationMs: readNumber(raw, ["generationMs", "generation_ms"], 0),
+  };
+
+  const repairs: string[] = [];
+  if (!isRecord(raw.userGuide) || !isRecord(raw.adminGuide)) {
+    repairs.push("Provider output repaired: mapped alternate guide keys and filled missing schema fields.");
+  }
+  if (adminEnvVars.length > 0) {
+    repaired.adminGuide.envVarsRequired = adminEnvVars.map((item) => item.replace(/`/g, "").trim()).filter(Boolean);
+  }
+
+  return { analysis: repaired, repairs };
+}
+
 function toTitleCase(input: string): string {
   return input
     .split(/[^a-zA-Z0-9]+/)
@@ -225,7 +459,8 @@ export async function analyzeDocumentationCandidate(input: AnalyzerInput): Promi
   const structuredEvidence = toStructuredEvidence(input.evidence);
   const deterministicProvider = new DeterministicProvider();
   const rawModelAnalysis = await analyzeWithFallback(structuredEvidence).catch(() => deterministicProvider.analyze(structuredEvidence));
-  const guardrailResult = validateAndSanitize(rawModelAnalysis);
+  const normalized = normalizeProviderOutput(rawModelAnalysis, structuredEvidence, inferredFeatureName);
+  const guardrailResult = validateAndSanitize(normalized.analysis);
   const sanitizedAnalysis = guardrailResult.passed ? guardrailResult.sanitized : await deterministicProvider.analyze(structuredEvidence);
   const resolvedFeatureName = sanitizedAnalysis.featureName?.trim() || inferredFeatureName;
   let resolvedFeatureKey = resolveAnalyzerFeatureKey({
@@ -275,6 +510,7 @@ export async function analyzeDocumentationCandidate(input: AnalyzerInput): Promi
     confidenceReasons: [
       ...deterministicWorthiness.reasons,
       ...confidence.reasons,
+      ...normalized.repairs,
       ...sanitizedAnalysis.confidenceReasons,
       ...(guardrailResult.passed ? [] : [...guardrailResult.violations, "Guardrail fallback applied to model output."]),
       ...(resolvedFeatureKey.dedupeDecision === "disambiguated_route_collision"

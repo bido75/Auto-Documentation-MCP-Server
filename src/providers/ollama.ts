@@ -1,5 +1,13 @@
 import { resolveOptionalRuntimeConfig } from "../lib/runtime-context.js";
-import { buildSharedPromptContent, type ModelAnalysis, type ModelProvider, type StructuredEvidence } from "./base.js";
+import {
+  buildManualAuthoringPrompt,
+  buildSharedPromptContent,
+  type ManualAuthoringProviderInput,
+  type ManualAuthoringProviderResult,
+  type ModelAnalysis,
+  type ModelProvider,
+  type StructuredEvidence,
+} from "./base.js";
 
 export class OllamaProvider implements ModelProvider {
   readonly supportsEmbeddings = true;
@@ -49,6 +57,41 @@ export class OllamaProvider implements ModelProvider {
       const body = (await response.json()) as { response: string };
       const parsed = JSON.parse(body.response) as ModelAnalysis;
       return { ...parsed, providerUsed: this.id, generationMs: Date.now() - startedAt };
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  }
+
+  async authorManualSection(input: ManualAuthoringProviderInput): Promise<ManualAuthoringProviderResult> {
+    const runtime = resolveOptionalRuntimeConfig();
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), runtime.provider.timeoutMs);
+    try {
+      const response = await fetch(`${runtime.provider.endpoint}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: runtime.provider.modelName,
+          prompt: buildManualAuthoringPrompt(input),
+          stream: false,
+          format: "json",
+          options: { temperature: runtime.provider.temperature, num_predict: 4096 },
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Ollama manual authoring HTTP ${response.status}: ${await response.text()}`);
+      }
+
+      const body = (await response.json()) as { response?: string };
+      const parsed = JSON.parse(body.response ?? "{}") as { body?: unknown };
+      const manualBody = typeof parsed.body === "string" ? parsed.body.trim() : "";
+      if (!manualBody) {
+        throw new Error(`Provider ${this.id} returned an empty manual body.`);
+      }
+      return { body: manualBody, providerUsed: this.id, generationMs: Date.now() - startedAt };
     } finally {
       clearTimeout(timeoutId);
     }

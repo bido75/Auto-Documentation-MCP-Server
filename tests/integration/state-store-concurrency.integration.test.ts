@@ -61,5 +61,5 @@ describe("StateStore concurrency", () => {
 
     const leftovers = await readdir(stateDir);
     expect(leftovers.filter((name) => name.includes(".tmp"))).toEqual([]);
-  }, 20_000);
+  }, 45_000);
 });

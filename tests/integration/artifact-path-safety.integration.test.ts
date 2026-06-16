@@ -128,6 +128,7 @@ async function setupProject() {
   const statePath = join(root, "state.json");
   process.env.AUTO_DOC_ARTIFACT_ROOT = join(root, "artifacts");
   process.env.AUTO_DOC_STATE_FILE = statePath;
+  process.env.AUTO_DOC_CAPTURE_ALLOWLIST = "example.com";
   process.env.NOTION_TOKEN = "test_token";
   testContext.notion = createFakeNotion();
   const store = new StateStore(statePath);
@@ -193,6 +194,7 @@ beforeEach(() => {
   testContext.pdfInputs = [];
   delete process.env.AUTO_DOC_ARTIFACT_ROOT;
   delete process.env.AUTO_DOC_STATE_FILE;
+  delete process.env.AUTO_DOC_CAPTURE_ALLOWLIST;
 });
 
 describe("constrain-artifact-output-paths", () => {

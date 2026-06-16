@@ -1,7 +1,7 @@
 import type { Client } from "@notionhq/client";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import type { DocumentationStatus, ManualEntryDraft, PublishingDecision } from "../types.js";
-import { divider, heading2, paragraphs } from "../lib/notion-blocks.js";
+import { divider, heading2, image, paragraphs } from "../lib/notion-blocks.js";
 
 export function decidePublishingStatus(input: {
   mode: "Conservative" | "Balanced" | "Fully Automatic";
@@ -46,6 +46,10 @@ export async function createManualEntry(input: {
   featurePageId?: string;
   releasePageId?: string;
 }) {
+  const figureBlocks =
+    input.draft.figures
+      ?.filter((figure) => figure.url && figure.url.trim().length > 0)
+      .map((figure) => image(figure.url ?? "", figure.caption)) ?? [];
   const payload = {
     parent: { database_id: input.databaseId },
     properties: {
@@ -94,7 +98,7 @@ export async function createManualEntry(input: {
         },
       }),
     },
-    children: [heading2(input.draft.entryType), ...paragraphs(input.draft.body), divider()],
+    children: [heading2(input.draft.entryType), ...paragraphs(input.draft.body), ...figureBlocks, divider()],
   };
 
   const page = await withNotionRetry(() =>

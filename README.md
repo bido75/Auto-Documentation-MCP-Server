@@ -10,6 +10,8 @@ The local bridge uses HTTP-SSE transport:
 
 ## Quick Start
 
+For a full cold-start path from clone to a first generated manual, use [QUICKSTART.md](QUICKSTART.md).
+
 1. Install dependencies:
 
 ```bash
@@ -55,22 +57,30 @@ Container default: HTTP bridge mode. The Docker image starts `node build/src/cli
 
 Use stdio MCP locally with `npm run dev` or `node build/src/index.js`. Use continuous mode with `AUTO_DOC_RUNTIME_MODE=runner node build/src/index.js` or `node build/src/cli/index.js runner` after configuring runner targets.
 
-## Langflow MCP Development Integration
+## VS Code MCP Development Integration
 
-This repository includes workspace MCP configuration for Langflow in:
+This repository includes local MCP workspace configuration in:
 
 - `.mcp.json`
 - `.vscode/mcp.json`
 
-The default connection uses `uvx mcp-proxy` with `streamablehttp` transport.
+The default connection runs this server directly over stdio:
+
+```json
+{
+  "command": "node",
+  "args": ["build/src/index.js"]
+}
+```
 
 Before running your MCP client in development:
 
-1. Replace `YOUR_LANGFLOW_API_KEY` in both files with your active Langflow API key.
-2. Keep the endpoint as `https://langflow.giscop.com/api/v1/mcp/project/2443b71b-51be-4fc3-9785-1ad162e8fb0a/streamable` unless your project ID changes.
-3. Restart your MCP client/IDE so the server entry is reloaded.
+1. Run `npm ci`.
+2. Run `npm run build`.
+3. Ensure your `.env` contains `NOTION_TOKEN`, `NOTION_PARENT_PAGE_ID`, and `STATE_ENCRYPTION_KEY`.
+4. Restart your MCP client/IDE so the server entry is reloaded.
 
-If `uvx` is not available in your shell PATH, install/repair your `uv` toolchain first.
+HTTP-SSE bridge mode remains available for web or remote clients. See [QUICKSTART.md](QUICKSTART.md) for bridge setup, Notion setup, provider configuration, and first tool calls.
 
 ## CI
 

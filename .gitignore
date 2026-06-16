@@ -12,6 +12,11 @@ coverage/
 
 # Local/state files
 .auto-doc/
+*.state.json
+*.state.json.bak
+.*.state.json
+.*.state.json.bak
+*.run-log.json
 playwright-report/
 test-results/
 
@@ -27,6 +32,7 @@ Thumbs.db
 
 # Local generated artifacts and diagnostics
 .tmp_*
+.codex/
 .vitest-report*.json
 .vitest-single.json
 .compose.rendered.yml
@@ -36,3 +42,12 @@ Microsoft/
 bifrost-assets/
 bifrost-data/
 packages/jetbrains-plugin/.gradle-bootstrap/
+functional-tests/artifacts/
+functional-tests/.*.state.json
+functional-tests/.*.state.json.bak
+functional-tests/.state-*.json
+functional-tests/.state-*.json.bak
+functional-tests/self-doc-*
+functional-tests/final-*.md
+functional-tests/final-*.json
+packages/vscode-extension/out/

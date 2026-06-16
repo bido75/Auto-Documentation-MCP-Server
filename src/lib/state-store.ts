@@ -2,8 +2,9 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync }
 import { copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { getOptionalRuntimeConfig } from "../config.js";
+import type { VisualEvidence } from "./visual-evidence.js";
 
-export const CURRENT_STATE_SCHEMA_VERSION = 3;
+export const CURRENT_STATE_SCHEMA_VERSION = 4;
 
 export interface ProjectDatabases {
   projectsDatabaseId: string;
@@ -34,6 +35,11 @@ export interface RunnerFailureTriageHistoryEntry {
   metadata: RunnerFailureTriageMetadata | null;
 }
 
+export interface AssembledManualState {
+  userPageId?: string;
+  adminPageId?: string;
+}
+
 export interface ProjectState {
   projectId: string;
   projectName: string;
@@ -46,6 +52,8 @@ export interface ProjectState {
   featuresByKey: Record<string, string>;
   eventsByExternalId: Record<string, string>;
   eventSnapshots: Record<string, EventSnapshot>;
+  visualEvidenceById?: Record<string, VisualEvidence>;
+  assembledManuals?: AssembledManualState;
   lastSeenReleaseTag?: string | null;
   releaseAutomationRuns?: ReleaseAutomationRun[];
   runnerFailureTriage?: RunnerFailureTriageMetadata;
@@ -90,6 +98,8 @@ interface LegacyProjectState {
   featuresByKey?: Record<string, string>;
   eventsByExternalId?: Record<string, string>;
   eventSnapshots?: Record<string, EventSnapshot>;
+  visualEvidenceById?: Record<string, VisualEvidence>;
+  assembledManuals?: AssembledManualState;
   lastSeenReleaseTag?: string | null;
   releaseAutomationRuns?: ReleaseAutomationRun[];
   runnerFailureTriage?: RunnerFailureTriageMetadata;
@@ -154,6 +164,8 @@ function normalizeProject(projectId: string, project: LegacyProjectState): Proje
     featuresByKey: project.featuresByKey ?? {},
     eventsByExternalId: project.eventsByExternalId ?? {},
     eventSnapshots: project.eventSnapshots ?? {},
+    visualEvidenceById: project.visualEvidenceById ?? {},
+    assembledManuals: project.assembledManuals ?? {},
     lastSeenReleaseTag: project.lastSeenReleaseTag ?? null,
     releaseAutomationRuns: project.releaseAutomationRuns ?? [],
     runnerFailureTriage: project.runnerFailureTriage ?? {},
@@ -340,6 +352,44 @@ export class StateStore {
   async getEventSnapshot(projectId: string, externalEventId: string): Promise<EventSnapshot | null> {
     const state = await this.load();
     return state.projects[projectId]?.eventSnapshots[externalEventId] ?? null;
+  }
+
+  async setVisualEvidence(projectId: string, visual: VisualEvidence): Promise<void> {
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
+
+      project.visualEvidenceById = project.visualEvidenceById ?? {};
+      project.visualEvidenceById[visual.visualId] = visual;
+    });
+  }
+
+  async getVisualEvidence(projectId: string, visualId: string): Promise<VisualEvidence | null> {
+    const state = await this.load();
+    return state.projects[projectId]?.visualEvidenceById?.[visualId] ?? null;
+  }
+
+  async setAssembledManualPage(projectId: string, audience: "user" | "admin", pageId: string): Promise<void> {
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
+
+      project.assembledManuals = project.assembledManuals ?? {};
+      if (audience === "user") {
+        project.assembledManuals.userPageId = pageId;
+      } else {
+        project.assembledManuals.adminPageId = pageId;
+      }
+    });
+  }
+
+  async getAssembledManualPages(projectId: string): Promise<AssembledManualState> {
+    const state = await this.load();
+    return state.projects[projectId]?.assembledManuals ?? {};
   }
 
   async getLastSeenReleaseTag(projectId: string, _repoPath: string): Promise<string | null> {

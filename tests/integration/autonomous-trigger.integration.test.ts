@@ -235,6 +235,22 @@ describe("run_autonomous_documentation_trigger", () => {
       expect(pagesAfterFirst.filter((page) => page.parent.database_id === "events_db")).toHaveLength(1);
       expect(pagesAfterFirst.filter((page) => page.parent.database_id === "features_db")).toHaveLength(1);
       expect(pagesAfterFirst.filter((page) => page.parent.database_id === "manual_entries_db")).toHaveLength(1);
+      const manualPage = pagesAfterFirst.find((page) => page.parent.database_id === "manual_entries_db");
+      const manualText = (manualPage?.children ?? [])
+        .map((block) => {
+          const candidate = block as { paragraph?: { rich_text?: Array<{ text?: { content?: string } }> }; heading_2?: { rich_text?: Array<{ text?: { content?: string } }> } };
+          return [
+            ...(candidate.heading_2?.rich_text ?? []).map((part) => part.text?.content ?? ""),
+            ...(candidate.paragraph?.rich_text ?? []).map((part) => part.text?.content ?? ""),
+          ].join("");
+        })
+        .filter(Boolean)
+        .join("\n");
+      expect(manualText).toContain("## Overview");
+      expect(manualText).toContain("## Step-by-step setup");
+      expect(manualText).toContain("Expected result:");
+      expect(manualText).not.toContain("Repo evidence excerpt:");
+      expect(manualText).not.toMatch(/Files changed:\s*\n- /);
 
       const second = parseTool<{ disposition: string; upsert: { featureId: string; manualEntryIds: string[] } | null }>(await handler!(input));
       expect(second.disposition).toBe("duplicate");

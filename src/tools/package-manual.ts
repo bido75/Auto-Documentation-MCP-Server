@@ -1,12 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
+import { composeAssembledManualMarkdown, type ManualAssemblyEntry } from "../lib/manual-assembler.js";
+import { extractManualContentFromBlocks } from "../lib/manual-blocks.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { createNotionClient } from "../lib/notion-client.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import { getStateStore } from "../lib/state-store.js";
-import { buildMarkdownManual } from "../packaging/manual-packager.js";
+import type { ManualFigure } from "../types.js";
 
 type NotionQueryResult = {
   results: Array<{ id: string; properties?: Record<string, unknown> }>;
@@ -21,6 +23,7 @@ type PackableEntry = {
   audience: "User" | "Admin" | "Both" | "Internal";
   status: "Captured" | "Needs Review" | "Approved" | "Published" | "Deprecated";
   featureIds: string[];
+  figures?: ManualFigure[];
 };
 
 function getStatusName(properties: Record<string, unknown>, key: string): string | null {
@@ -65,7 +68,7 @@ async function queryAll(notion: ReturnType<typeof createNotionClient>, input: Re
   return results;
 }
 
-async function loadEntryBody(notion: ReturnType<typeof createNotionClient>, pageId: string): Promise<string> {
+async function loadEntryContent(notion: ReturnType<typeof createNotionClient>, pageId: string): Promise<{ body: string; figures: ManualFigure[] }> {
   const blocksListPayload = { block_id: pageId, page_size: 100 };
   const response = (await withNotionRetry(() => notion.blocks.children.list(blocksListPayload), {
     operationName: "blocks.children.list",
@@ -73,24 +76,20 @@ async function loadEntryBody(notion: ReturnType<typeof createNotionClient>, page
   })) as {
     results: Array<{
       type?: string;
-      paragraph?: { rich_text?: Array<{ plain_text?: string }> };
+      paragraph?: { rich_text?: Array<{ plain_text?: string; text?: { content?: string } }> };
       heading_2?: { rich_text?: Array<{ plain_text?: string }> };
+      image?: {
+        type?: "external" | "file";
+        external?: { url?: string };
+        file?: { url?: string };
+        caption?: Array<{ plain_text?: string; text?: { content?: string } }>;
+      };
     }>;
     has_more?: boolean;
     next_cursor?: string | null;
   };
 
-  const lines: string[] = [];
-  for (const block of response.results) {
-    if (block.type === "paragraph") {
-      const text = (block.paragraph?.rich_text ?? []).map((part) => part.plain_text ?? "").join("").trim();
-      if (text) {
-        lines.push(text);
-      }
-    }
-  }
-
-  return lines.join("\n");
+  return extractManualContentFromBlocks(response.results);
 }
 
 async function loadManualEntriesFromNotion(input: {
@@ -126,15 +125,16 @@ async function loadManualEntriesFromNotion(input: {
     const status = getStatusName(properties, "Status") ?? "Captured";
     const title = getTitleValue(properties, "Entry Title") ?? `Entry ${page.id}`;
     const featureIds = getRelationIds(properties, "Feature");
-    const body = await loadEntryBody(input.notion, page.id);
+    const content = await loadEntryContent(input.notion, page.id);
 
     entries.push({
       pageId: page.id,
       title,
-      body,
+      body: content.body,
       audience: audience as PackableEntry["audience"],
       status: status as PackableEntry["status"],
       featureIds,
+      figures: content.figures,
     });
   }
 
@@ -159,6 +159,17 @@ export function registerPackageManualTool(server: McpServer) {
         z.object({
           title: z.string(),
           body: z.string(),
+          figures: z
+            .array(
+              z.object({
+                url: z.string().url().optional(),
+                artifactPath: z.string().optional(),
+                caption: z.string(),
+                altText: z.string().optional(),
+                visualId: z.string().optional(),
+              }),
+            )
+            .optional(),
           audience: z.enum(["User", "Admin", "Both", "Internal"]),
           status: z.enum(["Captured", "Needs Review", "Approved", "Published", "Deprecated"]),
           }),
@@ -211,6 +222,7 @@ export function registerPackageManualTool(server: McpServer) {
             body: entry.body,
             audience: entry.audience,
             status: entry.status,
+            figures: entry.figures,
             featureIds: [],
           }))
         : await loadManualEntriesFromNotion({
@@ -220,13 +232,19 @@ export function registerPackageManualTool(server: McpServer) {
             releasePageId,
           });
 
-        const selectedAudience = input.audience === "both" ? "Both" : input.audience === "user" ? "User" : "Admin";
-        const markdown = buildMarkdownManual({
-        projectName: input.projectName ?? project.projectName,
-        releaseVersion: input.releaseVersion,
-        audience: selectedAudience,
-        entries: sourceEntries,
-      });
+        const markdown = composeAssembledManualMarkdown({
+          projectName: input.projectName ?? project.projectName,
+          releaseVersion: input.releaseVersion,
+          audience: input.audience,
+          entries: sourceEntries.map((entry): ManualAssemblyEntry => ({
+            id: entry.pageId || entry.title,
+            title: entry.title,
+            audience: entry.audience,
+            status: entry.status,
+            body: entry.body,
+            figures: entry.figures,
+          })),
+        });
 
         const includedCount = sourceEntries.filter(
         (entry) =>

@@ -2,33 +2,47 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { renderManualMarkdown } from "../lib/export.js";
+import { composeAssembledManualMarkdown, type ManualAssemblyEntry } from "../lib/manual-assembler.js";
 import { resolveArtifactPath } from "../lib/artifact-paths.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
+import { extractManualContentFromBlocks } from "../lib/manual-blocks.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { createNotionClient } from "../lib/notion-client.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import { getStateStore } from "../lib/state-store.js";
-import type { Audience, DocumentationStatus } from "../types.js";
+import type { Audience, DocumentationStatus, ManualFigure } from "../types.js";
 
 type AudienceFilter = "user" | "admin" | "both";
 type PropertyMap = Record<string, unknown>;
-type RichTextPart = { plain_text?: string };
+type RichTextPart = { plain_text?: string; text?: { content?: string } };
 type NotionPage = { id: string; properties?: PropertyMap };
 type QueryInput = { database_id: string; filter?: unknown; page_size?: number; start_cursor?: string };
 type QueryResponse = { results: NotionPage[]; has_more?: boolean; next_cursor?: string | null };
-type BlockResponse = { results: Array<{ type?: string; paragraph?: { rich_text?: RichTextPart[] } }> };
+type BlockResponse = {
+    results: Array<{
+        type?: string;
+        paragraph?: { rich_text?: RichTextPart[] };
+        image?: {
+            type?: "external" | "file";
+            external?: { url?: string };
+            file?: { url?: string };
+            caption?: RichTextPart[];
+        };
+    }>;
+};
 type NotionClientLike = {
     databases: { query(input: QueryInput): Promise<QueryResponse> };
     blocks: { children: { list(input: { block_id: string; page_size: number }): Promise<BlockResponse> } };
 };
 type PublishedEntry = {
+    id: string;
     title: string;
     entryType: string;
     audience: Audience;
     status: DocumentationStatus;
     body: string;
+    figures?: ManualFigure[];
 };
 type LoadPublishedEntriesInput = {
     notion: NotionClientLike;
@@ -87,7 +101,7 @@ async function queryAll(notion: NotionClientLike, input: QueryInput): Promise<No
     } while (cursor);
     return results;
 }
-async function loadEntryBody(notion: NotionClientLike, pageId: string): Promise<string> {
+async function loadEntryContent(notion: NotionClientLike, pageId: string): Promise<{ body: string; figures: ManualFigure[] }> {
     const response = await withNotionRetry(() => notion.blocks.children.list({
         block_id: pageId,
         page_size: 100,
@@ -98,17 +112,7 @@ async function loadEntryBody(notion: NotionClientLike, pageId: string): Promise<
             page_size: 100,
         },
     });
-    const lines: string[] = [];
-    for (const block of response.results) {
-        if (block.type !== "paragraph") {
-            continue;
-        }
-        const text = (block.paragraph?.rich_text ?? []).map((part: RichTextPart) => part.plain_text ?? "").join("").trim();
-        if (text) {
-            lines.push(text);
-        }
-    }
-    return lines.join("\n");
+    return extractManualContentFromBlocks(response.results);
 }
 async function loadPublishedEntries(input: LoadPublishedEntriesInput): Promise<PublishedEntry[]> {
     const filters: unknown[] = [
@@ -135,12 +139,15 @@ async function loadPublishedEntries(input: LoadPublishedEntriesInput): Promise<P
     const entries: PublishedEntry[] = [];
     for (const page of pages) {
         const properties = page.properties ?? {};
+        const content = await loadEntryContent(input.notion, page.id);
         entries.push({
+            id: page.id,
             title: getTitleValue(properties, "Entry Title") ?? `Entry ${page.id}`,
             entryType: getSelectName(properties, "Entry Type") ?? "",
             audience: normalizeAudience(getSelectName(properties, "Audience")),
             status: normalizeStatus(getStatusName(properties, "Status")),
-            body: await loadEntryBody(input.notion, page.id),
+            body: content.body,
+            figures: content.figures,
         });
     }
     return entries;
@@ -208,10 +215,19 @@ export function registerSyncManualToLocalDocsTool(server: McpServer): void {
                 projectPageId,
                 releasePageId,
             });
-            const markdown = renderManualMarkdown({
+            const markdown = composeAssembledManualMarkdown({
                 projectName: project.projectName,
                 audience,
-                entries,
+                releaseVersion,
+                entries: entries.map((entry): ManualAssemblyEntry => ({
+                    id: entry.id,
+                    title: entry.title,
+                    entryType: entry.entryType,
+                    audience: entry.audience,
+                    status: entry.status,
+                    body: entry.body,
+                    figures: entry.figures,
+                })),
             });
             await mkdir(dirname(safeOutputPath), { recursive: true });
             await writeFile(safeOutputPath, markdown, "utf-8");

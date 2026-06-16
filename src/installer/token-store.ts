@@ -6,9 +6,6 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 const WINDOWS_POWERSHELL_ARGS = ["-NoLogo", "-NonInteractive", "-NoProfile", "-Command"];
-const TOKEN_DIR = path.join(os.homedir(), ".auto-doc-mcp");
-const LINUX_ENV_PATH = path.join(TOKEN_DIR, ".env");
-const WINDOWS_DPAPI_PATH = path.join(TOKEN_DIR, "token.dpapi");
 export const TOKEN_PLACEHOLDER = "__NOTION_TOKEN__";
 
 type SecretBackend = "keychain" | "dpapi-file" | "env-file";
@@ -17,12 +14,18 @@ function normalizeSecretName(secretName: string): string {
     return secretName.replace(/[^a-z0-9_-]+/gi, "-").toLowerCase();
 }
 
+function getTokenDir(): string {
+    return process.env.AUTO_DOC_TOKEN_DIR?.trim() || path.join(os.homedir(), ".auto-doc-mcp");
+}
+
 function getLinuxSecretPath(secretName: string): string {
-    return secretName === "notion-token" ? LINUX_ENV_PATH : path.join(TOKEN_DIR, `${normalizeSecretName(secretName)}.env`);
+    const tokenDir = getTokenDir();
+    return secretName === "notion-token" ? path.join(tokenDir, ".env") : path.join(tokenDir, `${normalizeSecretName(secretName)}.env`);
 }
 
 function getWindowsSecretPath(secretName: string): string {
-    return secretName === "notion-token" ? WINDOWS_DPAPI_PATH : path.join(TOKEN_DIR, `${normalizeSecretName(secretName)}.dpapi`);
+    const tokenDir = getTokenDir();
+    return secretName === "notion-token" ? path.join(tokenDir, "token.dpapi") : path.join(tokenDir, `${normalizeSecretName(secretName)}.dpapi`);
 }
 
 async function runPowerShellWithStdin(command: string, input: string): Promise<string> {
@@ -63,7 +66,7 @@ async function storeNamedSecret(secretName: string, value: string): Promise<Secr
         return "keychain";
     }
     if (process.platform === "win32") {
-        await fs.mkdir(TOKEN_DIR, { recursive: true });
+        await fs.mkdir(getTokenDir(), { recursive: true });
         const command = [
             "$plain = [Console]::In.ReadToEnd()",
             "$secure = ConvertTo-SecureString $plain -AsPlainText -Force",
@@ -73,7 +76,7 @@ async function storeNamedSecret(secretName: string, value: string): Promise<Secr
         await fs.writeFile(getWindowsSecretPath(secretName), stdout.trim(), "utf8");
         return "dpapi-file";
     }
-    await fs.mkdir(TOKEN_DIR, { recursive: true });
+    await fs.mkdir(getTokenDir(), { recursive: true });
     await fs.writeFile(getLinuxSecretPath(secretName), `${secretName.toUpperCase().replace(/[^A-Z0-9]+/g, "_")}=${value}\n`, {
         encoding: "utf8",
         mode: 0o600,

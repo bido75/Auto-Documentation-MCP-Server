@@ -1,25 +1,48 @@
 import OpenAI from "openai";
 import { resolveOptionalRuntimeConfig } from "../lib/runtime-context.js";
-import { buildSharedPromptContent, type ModelAnalysis, type ModelProvider, type StructuredEvidence } from "./base.js";
+import {
+  buildManualAuthoringPrompt,
+  buildSharedPromptContent,
+  type ManualAuthoringProviderInput,
+  type ManualAuthoringProviderResult,
+  type ModelAnalysis,
+  type ModelProvider,
+  type StructuredEvidence,
+} from "./base.js";
+
+export type OpenAIProviderOptions = {
+  id?: string;
+  displayName?: string;
+  endpoint?: string;
+  apiKey?: string;
+  modelName?: string;
+};
 
 export class OpenAIProvider implements ModelProvider {
-  readonly id: string = "cloud-openai";
+  readonly id: string;
   readonly supportsEmbeddings = true;
   readonly displayName: string;
   private readonly client: OpenAI;
+  private readonly endpoint: string;
+  private readonly apiKey?: string;
+  private readonly modelName?: string;
 
-  constructor() {
+  constructor(options: OpenAIProviderOptions = {}) {
     const runtime = resolveOptionalRuntimeConfig();
-    this.displayName = `OpenAI (${runtime.provider.modelName})`;
-    const maybeBifrostHeaders = runtime.provider.endpoint.includes("bifrost")
+    this.id = options.id ?? "cloud-openai";
+    this.endpoint = options.endpoint ?? runtime.provider.endpoint;
+    this.apiKey = options.apiKey ?? runtime.provider.apiKey;
+    this.modelName = options.modelName ?? runtime.provider.modelName;
+    this.displayName = options.displayName ?? `OpenAI (${this.modelName})`;
+    const maybeBifrostHeaders = this.endpoint.includes("bifrost")
       ? {
           ...(runtime.provider.bifrostVk ? { "x-bf-vk": runtime.provider.bifrostVk } : {}),
           "x-bf-eh-client-id": "auto-doc-mcp",
         }
       : undefined;
     this.client = new OpenAI({
-      apiKey: runtime.provider.apiKey,
-      baseURL: runtime.provider.endpoint,
+      apiKey: this.apiKey,
+      baseURL: this.endpoint,
       timeout: runtime.provider.timeoutMs,
       maxRetries: runtime.provider.maxRetries,
       ...(maybeBifrostHeaders ? { defaultHeaders: maybeBifrostHeaders } : {}),
@@ -39,7 +62,7 @@ export class OpenAIProvider implements ModelProvider {
     const runtime = resolveOptionalRuntimeConfig();
     const startedAt = Date.now();
     const response = await this.client.chat.completions.create({
-      model: runtime.provider.modelName,
+      model: this.modelName ?? runtime.provider.modelName,
       temperature: runtime.provider.temperature,
       response_format: { type: "json_object" },
       messages: [
@@ -49,7 +72,33 @@ export class OpenAIProvider implements ModelProvider {
     });
     const content = response.choices[0]?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as ModelAnalysis;
-    return { ...parsed, providerUsed: `${this.id}:${runtime.provider.modelName}`, generationMs: Date.now() - startedAt };
+    return { ...parsed, providerUsed: `${this.id}:${this.modelName ?? runtime.provider.modelName}`, generationMs: Date.now() - startedAt };
+  }
+
+  async authorManualSection(input: ManualAuthoringProviderInput): Promise<ManualAuthoringProviderResult> {
+    const runtime = resolveOptionalRuntimeConfig();
+    const model = this.modelName ?? runtime.provider.modelName;
+    const startedAt = Date.now();
+    const response = await this.client.chat.completions.create({
+      model,
+      temperature: runtime.provider.temperature,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a senior technical manual writer. Produce concrete, novice-readable markdown inside valid JSON only.",
+        },
+        { role: "user", content: buildManualAuthoringPrompt(input) },
+      ],
+    });
+    const content = response.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(content) as { body?: unknown };
+    const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
+    if (!body) {
+      throw new Error(`Provider ${this.id} returned an empty manual body.`);
+    }
+    return { body, providerUsed: `${this.id}:${model}`, generationMs: Date.now() - startedAt };
   }
 
   async embed(text: string): Promise<number[]> {

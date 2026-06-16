@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { collectGitEvidence } from "../evidence/git.js";
+import { authorManualSection } from "../lib/manual-author.js";
 import { getStateStore, type ProjectState } from "../lib/state-store.js";
 import { registerAnalyzeDocumentationCandidateTool } from "../tools/analyze-documentation-candidate.js";
 import { registerCaptureDevelopmentEventTool } from "../tools/capture-development-event.js";
@@ -64,6 +65,23 @@ type AnalyzeResponse = {
   fallbackStatus: "Captured" | null;
   fallbackEntryId: string | null;
   fallbackReasonCode: string;
+  generatedNarratives?: {
+    providerUsed: string;
+    userGuide: {
+      summary: string;
+      steps: string[];
+      expectedOutcome: string;
+      possibleErrors: string[];
+    };
+    adminGuide: {
+      configRequired: string[];
+      endpointsAffected: string[];
+      envVarsRequired: string[];
+      verificationSteps: string[];
+      troubleshooting: string[];
+    };
+    developerNotes?: string;
+  };
   traceId: string;
 };
 
@@ -99,6 +117,10 @@ export type AutonomousTriggerResult = {
   repoPath?: string;
   mode: AutonomousTriggerInput["mode"];
   disposition: "documented" | "duplicate" | "skipped";
+  documentedFeatureCount: number;
+  analyzerFailureCount: number;
+  skippedCount: number;
+  duplicateCount: number;
   capture: CaptureResponse;
   analysis: AnalyzeResponse;
   upsert: { featureId: string; manualEntryIds: string[] } | null;
@@ -199,11 +221,30 @@ function extractRoute(filesChanged: string[]): string[] {
   return [...routes];
 }
 
-function buildManualEntries(input: {
+function analyzerFailed(analysis: AnalyzeResponse): boolean {
+  return (
+    analysis.fallbackReasonCode === "provider_output_invalid" ||
+    analysis.fallbackReasonCode === "analyzer_exception" ||
+    analysis.fallbackReasonCode === "analyzer_exception_fallback_persisted" ||
+    analysis.fallbackReasonCode === "analyzer_exception_fallback_persist_failed"
+  );
+}
+
+function resultCounts(disposition: AutonomousTriggerResult["disposition"], analysis: AnalyzeResponse) {
+  return {
+    documentedFeatureCount: disposition === "documented" ? 1 : 0,
+    analyzerFailureCount: analyzerFailed(analysis) ? 1 : 0,
+    skippedCount: disposition === "skipped" ? 1 : 0,
+    duplicateCount: disposition === "duplicate" ? 1 : 0,
+  };
+}
+
+async function buildManualEntries(input: {
   analysis: AnalyzeResponse;
   captureInput: CaptureInput;
   filesChanged: string[];
-}): Array<{
+  repoPath?: string;
+}): Promise<Array<{
   entryType: EntryType;
   title: string;
   userGuide: string;
@@ -211,21 +252,36 @@ function buildManualEntries(input: {
   developerNotes?: string;
   routes?: string[];
   apiEndpoints?: string[];
-}> {
+}>> {
   const entryTypes = input.analysis.entryTypes.length > 0 ? input.analysis.entryTypes : (["Developer Note"] as EntryType[]);
   const routes = extractRoute(input.filesChanged);
-  const filesList = input.filesChanged.length > 0 ? `\n\nFiles changed:\n${input.filesChanged.map((file) => `- ${file}`).join("\n")}` : "";
-  const diff = input.captureInput.diffSummary ? `\n\nImplementation notes:\n${input.captureInput.diffSummary}` : "";
-  const body = `${input.captureInput.summary}${diff}${filesList}`;
+  const entries = [];
 
-  return entryTypes.map((entryType) => ({
-    entryType,
-    title: `${input.analysis.featureName} ${entryType}`,
-    userGuide: body,
-    adminGuide: body,
-    developerNotes: body,
-    routes: routes.length > 0 ? routes : undefined,
-  }));
+  for (const entryType of entryTypes) {
+    const audience: Audience =
+      entryType === "User Guide" ? "User" : entryType === "Admin Guide" ? "Admin" : "Internal";
+    const authored = await authorManualSection({
+      audience,
+      entryType,
+      featureName: input.analysis.featureName,
+      summary: input.captureInput.summary,
+      diffSummary: input.captureInput.diffSummary,
+      filesChanged: input.filesChanged,
+      repoPath: input.repoPath,
+      providerNarrative: input.analysis.generatedNarratives,
+    });
+
+    entries.push({
+      entryType,
+      title: `${input.analysis.featureName} ${entryType}`,
+      userGuide: entryType === "User Guide" ? authored.body : "",
+      adminGuide: entryType === "Admin Guide" ? authored.body : "",
+      developerNotes: entryType !== "User Guide" && entryType !== "Admin Guide" ? authored.body : undefined,
+      routes: routes.length > 0 ? routes : undefined,
+    });
+  }
+
+  return entries;
 }
 
 async function buildCaptureInput(input: AutonomousTriggerInput): Promise<CaptureInput> {
@@ -293,12 +349,14 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
 
   const duplicateFeatureId = await store.getFeature(input.projectId, analysis.featureKey);
   if (duplicateFeatureId) {
+    const counts = resultCounts("duplicate", analysis);
     return {
       ok: true,
       projectId: input.projectId,
       repoPath: input.repoPath,
       mode: input.mode,
       disposition: "duplicate",
+      ...counts,
       capture,
       analysis,
       upsert: null,
@@ -307,12 +365,14 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
   }
 
   if (!analysis.shouldDocument) {
+    const counts = resultCounts("skipped", analysis);
     return {
       ok: true,
       projectId: input.projectId,
       repoPath: input.repoPath,
       mode: input.mode,
       disposition: "skipped",
+      ...counts,
       capture,
       analysis,
       upsert: null,
@@ -328,7 +388,7 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
       featureKey: analysis.featureKey,
       featureName: analysis.featureName,
       audiences: analysis.audiences,
-      manualEntries: buildManualEntries({ analysis, captureInput, filesChanged: captureFilesChanged }),
+      manualEntries: await buildManualEntries({ analysis, captureInput, filesChanged: captureFilesChanged, repoPath: input.repoPath }),
       evidenceEventIds: [capture.evidenceEventId],
       confidenceScore: analysis.confidenceScore,
       confidenceReasons: analysis.confidenceReasons,
@@ -354,12 +414,14 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
     }),
   );
 
+  const counts = resultCounts("documented", analysis);
   return {
     ok: true,
     projectId: input.projectId,
     repoPath: input.repoPath,
     mode: input.mode,
     disposition: "documented",
+    ...counts,
     capture,
     analysis,
     upsert: { featureId: upsert.featureId, manualEntryIds },
