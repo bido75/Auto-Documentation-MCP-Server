@@ -54,6 +54,35 @@ function inferFeatureNameFromEvidence(summaries: string[]): string {
   return toTitleCase(normalized || "Captured Feature Update");
 }
 
+function titleFromFilePath(filePath: string): string {
+  const baseName = filePath
+    .replaceAll("\\", "/")
+    .split("/")
+    .pop()
+    ?.replace(/\.[a-z0-9]+$/i, "")
+    .trim();
+  const title = toTitleCase(baseName ?? "");
+  return title ? `${title} Helpers` : "Captured Feature Update";
+}
+
+function hasGitPlumbingFeatureName(input: string): boolean {
+  return (
+    /\bcommit\s+[a-f0-9]{7,40}\b/i.test(input) ||
+    /\bAuthor:/i.test(input) ||
+    /<[^>\s]+@[^>]+>/.test(input) ||
+    /[<>]/.test(input)
+  );
+}
+
+function inferCleanFeatureName(input: { inferredFeatureName: string; filesChanged: string[] }): string {
+  const primaryFile = input.filesChanged.find((filePath) => /\.(?:[cm]?[jt]sx?|tsx?|py|go|rs|java|cs)$/i.test(filePath)) ?? input.filesChanged[0];
+  if (hasGitPlumbingFeatureName(input.inferredFeatureName) && primaryFile) {
+    return titleFromFilePath(primaryFile);
+  }
+
+  return hasGitPlumbingFeatureName(input.inferredFeatureName) ? "Captured Feature Update" : input.inferredFeatureName;
+}
+
 function inferModuleFromEvidence(haystack: string): string | undefined {
   const checks: Array<[string, string]> = [
     ["auth", "Auth"],
@@ -166,7 +195,10 @@ export function registerAnalyzeDocumentationCandidateTool(server: McpServer) {
         }
 
         const summaries = evidence.map((item) => item.summary);
-        const featureName = inferFeatureNameFromEvidence(summaries);
+        const featureName = inferCleanFeatureName({
+          inferredFeatureName: inferFeatureNameFromEvidence(summaries),
+          filesChanged: evidence.flatMap((item) => item.filesChanged),
+        });
 
         try {
           const analysis = await analyzeDocumentationCandidate({

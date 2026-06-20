@@ -15,7 +15,7 @@ import { registerUpsertFeatureDocumentationTool } from "../tools/upsert-feature-
 import { createServer, REGISTERED_TOOL_NAMES, SERVER_METADATA } from "../server.js";
 import { executeAutonomousDocumentationTrigger, type AutonomousTriggerInput } from "../orchestrator/auto-doc-orchestrator.js";
 import { parseContinuousRunnerTargets } from "../runner/index.js";
-import { buildCandidate } from "../providers/factory.js";
+import { buildCandidate, preflightProviderTiers, type ProviderTierPreflightResult } from "../providers/factory.js";
 
 const DEFAULT_PORT = 3741;
 const DEFAULT_WEBHOOK_RATE_LIMIT_PER_MINUTE = 60;
@@ -189,6 +189,7 @@ type StartupPreflightSummary = {
   provider: {
     candidateId: string;
     healthy: boolean;
+    tiers: ProviderTierPreflightResult[];
     bifrostRouteValidation: ReturnType<typeof validateBifrostRouteConfig>;
   };
   runner: {
@@ -431,14 +432,16 @@ async function buildStartupPreflightSummary(host: string, port: number): Promise
   const warnings: string[] = [];
   let candidateId = "deterministic";
   let healthy = false;
+  let providerTiers: ProviderTierPreflightResult[] = [];
 
   try {
     const candidate = buildCandidate();
     candidateId = candidate.id;
-    healthy = await candidate.healthCheck().catch(() => false);
+    providerTiers = await preflightProviderTiers();
+    healthy = providerTiers.find((tier) => tier.providerId === candidate.id)?.healthy ?? false;
 
     if (!healthy) {
-      warnings.push(`Provider ${candidate.id} health check failed. Deterministic fallback may be used.`);
+      warnings.push(`Provider ${candidate.id} generation preflight failed. Deterministic fallback may be used.`);
     }
   } catch (error) {
     candidateId = "unavailable";
@@ -484,6 +487,7 @@ async function buildStartupPreflightSummary(host: string, port: number): Promise
     provider: {
       candidateId,
       healthy,
+      tiers: providerTiers,
       bifrostRouteValidation,
     },
     runner: {

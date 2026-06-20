@@ -197,4 +197,50 @@ describe("analyzer output repair", () => {
     expect(result.generatedNarratives.userGuide.summary).toContain("packaged release output");
     expect(result.generatedNarratives.userGuide.steps).toContain("Documentation Pipeline");
   });
+
+  it("replaces raw git-log provider feature names with a clean file-derived feature name", async () => {
+    provider.output = {
+      featureName: "commit 2c9b3e1ca4511f4d443d4407991f68092aa9d13d Author: Vincent K. Gbewonyo <bid",
+      shouldDocument: true,
+      audiences: ["User"],
+      userGuide: {
+        summary: "Users can create and summarize notification helper objects.",
+        steps: ["Call buildNotification", "Call summarize"],
+        expectedOutcome: "Notification helpers return source-defined objects and counts.",
+        possibleErrors: [],
+      },
+      adminGuide: {
+        configRequired: [],
+        endpointsAffected: [],
+        envVarsRequired: [],
+        verificationSteps: [],
+        troubleshooting: [],
+      },
+      confidenceScore: 70,
+      confidenceReasons: ["Provider described the change."],
+      reviewQuestions: [],
+      providerUsed: "cloud-openai:test",
+    } as unknown as ModelAnalysis;
+
+    const { analyzeDocumentationCandidate } = await import("../../src/lib/analyzer.js");
+    const result = await analyzeDocumentationCandidate({
+      projectId: "project_1",
+      evidence: [
+        {
+          summary:
+            "commit 2c9b3e1ca4511f4d443d4407991f68092aa9d13d Author: Vincent K. Gbewonyo <bid@example.com> Add notification helper",
+          diffSummary: "Adds buildNotification, shouldRetry, nextBackoffMs, and summarize helpers.",
+          filesChanged: ["notification-qwen-instruct-experiment.js"],
+          eventType: "commit",
+          source: "local_git",
+          testStatus: "passed",
+          branch: "main",
+        },
+      ],
+      existingFeatureKeys: [],
+    });
+
+    expect(result.featureName).toBe("Notification Qwen Instruct Experiment Helpers");
+    expect(result.featureName).not.toMatch(/\bcommit\b|2c9b3e1|Author|Vincent|Gbewonyo|bid@example|[<>]/i);
+  });
 });

@@ -25,6 +25,7 @@ export interface OptionalRuntimeConfig {
     modelName: string;
     fallbackModels: string[];
     cloudFallbackModel?: string;
+    cloudFallbackModels: string[];
     cloudFallbackEndpoint: string;
     cloudFallbackApiKey?: string;
     temperature: number;
@@ -95,6 +96,32 @@ function envBool(key: string, fallback: boolean, env: NodeJS.ProcessEnv): boolea
 }
 
 export const DEFAULT_STATE_ENCRYPTION_KEY = "auto-doc-mcp-default-dev-key-change-me";
+export const DEFAULT_CLOUD_FALLBACK_MODELS = [
+  "qwen/qwen3-next-80b-a3b-instruct:free",
+  "qwen/qwen3-next-80b-a3b-instruct",
+  "qwen/qwen3-coder-flash",
+];
+
+function parseCsv(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function resolveCloudFallbackModels(env: NodeJS.ProcessEnv): string[] {
+  const configuredList = parseCsv(env.AI_CLOUD_FALLBACK_MODELS);
+  if (configuredList.length > 0) {
+    return configuredList.slice(0, 3);
+  }
+
+  const legacySingle = env.AI_CLOUD_FALLBACK_MODEL?.trim();
+  if (legacySingle) {
+    return [legacySingle];
+  }
+
+  return DEFAULT_CLOUD_FALLBACK_MODELS;
+}
 
 const PLACEHOLDER_STATE_ENCRYPTION_KEYS = new Set([
   DEFAULT_STATE_ENCRYPTION_KEY,
@@ -129,6 +156,7 @@ export function assertProductionSecretConfig(env = process.env): void {
 
 export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConfig {
   const bifrostVk = env.BIFROST_VIRTUAL_KEY?.trim() || "";
+  const cloudFallbackModels = resolveCloudFallbackModels(env);
   return {
     notionToken: env.NOTION_TOKEN?.trim() || undefined,
     corsAllowedOrigins: envString("CORS_ALLOWED_ORIGINS", "http://localhost", env)
@@ -147,11 +175,12 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
       fallbackModels: [env.AI_FALLBACK_MODEL_1?.trim(), env.AI_FALLBACK_MODEL_2?.trim(), env.AI_FALLBACK_MODEL_3?.trim()].filter(
         (value): value is string => Boolean(value),
       ),
-      cloudFallbackModel: env.AI_CLOUD_FALLBACK_MODEL?.trim() || undefined,
+      cloudFallbackModel: cloudFallbackModels[0],
+      cloudFallbackModels,
       cloudFallbackEndpoint: envString("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1", env),
       cloudFallbackApiKey: env.OPENROUTER_API_KEY?.trim() || undefined,
       temperature: envFloat("AI_TEMPERATURE", 0.2, env),
-      timeoutMs: envInt("AI_TIMEOUT_MS", 45000, env),
+      timeoutMs: envInt("AI_TIMEOUT_MS", 90000, env),
       maxRetries: envInt("AI_MAX_RETRIES", 2, env),
       fallbackToDeterm: envBool("AI_FALLBACK_TO_DETERMINISTIC", true, env),
       bifrostVk,
@@ -177,7 +206,7 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
       maxConcurrentTargets: envInt("RUNNER_MAX_CONCURRENT", 4, env),
       maxConsecutiveFailures: envInt("RUNNER_MAX_FAILURES", 5, env),
       circuitResetAfterMs: envInt("RUNNER_CIRCUIT_RESET_MS", 300000, env),
-      perTargetTimeoutMs: envInt("RUNNER_TARGET_TIMEOUT_MS", 60000, env),
+      perTargetTimeoutMs: envInt("RUNNER_TARGET_TIMEOUT_MS", envInt("AI_TIMEOUT_MS", 90000, env), env),
     },
     prompts: {
       analyzerPromptName: envString("AUTO_DOC_ANALYZER_PROMPT_NAME", "auto-doc-analyzer", env),

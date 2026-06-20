@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { parseContinuousRunnerTargets } from "../../src/runner/index.js";
+import { getOptionalRuntimeConfig } from "../../src/config.js";
+import { parseContinuousRunnerConfig, parseContinuousRunnerTargets } from "../../src/runner/index.js";
 
 const envKeys = [
   "AUTO_DOC_RUNNER_TARGETS",
@@ -9,11 +10,18 @@ const envKeys = [
   "AUTO_DOC_RUNNER_RELEASE_AUTOMATION",
   "AUTO_DOC_RUNNER_RELEASE_AUDIENCE",
   "AUTO_DOC_RUNNER_RELEASE_PACKAGE_FORMAT",
+  "AUTO_DOC_RUNTIME_MODE",
+  "NOTION_TOKEN",
+  "STATE_ENCRYPTION_KEY",
+  "AI_TIMEOUT_MS",
+  "AI_CLOUD_FALLBACK_MODEL",
+  "AI_CLOUD_FALLBACK_MODELS",
+  "RUNNER_TARGET_TIMEOUT_MS",
 ] as const;
 
 const previousValues = new Map<(typeof envKeys)[number], string | undefined>();
 
-function setRunnerEnv(values: Record<(typeof envKeys)[number], string | undefined>): void {
+function setRunnerEnv(values: Partial<Record<(typeof envKeys)[number], string | undefined>>): void {
   for (const key of envKeys) {
     if (!previousValues.has(key)) {
       previousValues.set(key, process.env[key]);
@@ -99,5 +107,75 @@ describe("parseContinuousRunnerTargets", () => {
         releaseAutomation: false,
       },
     ]);
+  });
+
+  it("defaults per-target timeout to the configured provider timeout when runner timeout is unset", () => {
+    setRunnerEnv({
+      AUTO_DOC_RUNNER_TARGETS: undefined,
+      AUTO_DOC_RUNNER_PROJECT_ID: "project-123",
+      AUTO_DOC_RUNNER_REPO_PATH: "C:/repos/manual-creator",
+      AUTO_DOC_RUNNER_MODE: "last_commit",
+      AUTO_DOC_RUNNER_RELEASE_AUTOMATION: undefined,
+      AUTO_DOC_RUNNER_RELEASE_AUDIENCE: undefined,
+      AUTO_DOC_RUNNER_RELEASE_PACKAGE_FORMAT: undefined,
+      AUTO_DOC_RUNTIME_MODE: "runner",
+      NOTION_TOKEN: "test-notion-token",
+      STATE_ENCRYPTION_KEY: "test-state-key-not-a-real-secret",
+      AI_TIMEOUT_MS: "90000",
+      RUNNER_TARGET_TIMEOUT_MS: undefined,
+    });
+
+    expect(parseContinuousRunnerConfig().perTargetTimeoutMs).toBe(90000);
+  });
+
+  it("uses production-safe provider timeout and real OpenRouter fallback model defaults when unset", () => {
+    setRunnerEnv({
+      AUTO_DOC_RUNNER_TARGETS: undefined,
+      AUTO_DOC_RUNNER_PROJECT_ID: "project-123",
+      AUTO_DOC_RUNNER_REPO_PATH: "C:/repos/manual-creator",
+      AUTO_DOC_RUNNER_MODE: "last_commit",
+      AUTO_DOC_RUNTIME_MODE: "runner",
+      NOTION_TOKEN: "test-notion-token",
+      STATE_ENCRYPTION_KEY: "test-state-key-not-a-real-secret",
+      AI_TIMEOUT_MS: undefined,
+      AI_CLOUD_FALLBACK_MODEL: undefined,
+      AI_CLOUD_FALLBACK_MODELS: undefined,
+      RUNNER_TARGET_TIMEOUT_MS: undefined,
+    });
+
+    const runtime = getOptionalRuntimeConfig();
+
+    expect(runtime.provider.timeoutMs).toBe(90000);
+    expect(runtime.runner.perTargetTimeoutMs).toBeGreaterThanOrEqual(runtime.provider.timeoutMs);
+    expect(runtime.provider.cloudFallbackModel).toBe("qwen/qwen3-next-80b-a3b-instruct:free");
+    expect(runtime.provider.cloudFallbackModels).toEqual([
+      "qwen/qwen3-next-80b-a3b-instruct:free",
+      "qwen/qwen3-next-80b-a3b-instruct",
+      "qwen/qwen3-coder-flash",
+    ]);
+  });
+
+  it("parses the ordered cloud fallback model list and caps it to three rungs", () => {
+    setRunnerEnv({
+      AI_CLOUD_FALLBACK_MODEL: undefined,
+      AI_CLOUD_FALLBACK_MODELS: "first/model, second/model ,third/model,fourth/model",
+    });
+
+    const runtime = getOptionalRuntimeConfig();
+
+    expect(runtime.provider.cloudFallbackModels).toEqual(["first/model", "second/model", "third/model"]);
+    expect(runtime.provider.cloudFallbackModel).toBe("first/model");
+  });
+
+  it("keeps the legacy single cloud fallback model as an alias when the ordered list is unset", () => {
+    setRunnerEnv({
+      AI_CLOUD_FALLBACK_MODEL: "legacy/model",
+      AI_CLOUD_FALLBACK_MODELS: undefined,
+    });
+
+    const runtime = getOptionalRuntimeConfig();
+
+    expect(runtime.provider.cloudFallbackModels).toEqual(["legacy/model"]);
+    expect(runtime.provider.cloudFallbackModel).toBe("legacy/model");
   });
 });

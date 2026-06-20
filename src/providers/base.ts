@@ -61,6 +61,7 @@ export interface ModelProvider {
   readonly supportsEmbeddings: boolean;
   analyze(evidence: StructuredEvidence): Promise<ModelAnalysis>;
   authorManualSection?(input: ManualAuthoringProviderInput): Promise<ManualAuthoringProviderResult>;
+  preflightGenerate?(): Promise<string>;
   embed?(text: string): Promise<number[]>;
   healthCheck(): Promise<boolean>;
 }
@@ -123,7 +124,13 @@ Authoring requirements:
 - Write clear novice-readable documentation, not an evidence log.
 - Include a short overview, prerequisites or requirements, ordered steps, expected result, and troubleshooting.
 - Use real commands, environment variable names, and operational details from the source context when available.
-- Do not invent screenshots, deployed URLs, credentials, or product behavior not supported by the source.
+- Document only what is present in the provided source evidence.
+- Do NOT invent function names, parameters, parameter types, units, return values, environment variables, configuration, dependencies, file paths, screenshots, deployed URLs, credentials, or numeric behavior.
+- Use the exact identifiers and literals from the source, including exact function names, exact parameter names, exact return expressions, and exact numeric multipliers.
+- If the source context contains exported functions, document every exported function with its exact signature and source-visible behavior. Treat commit messages, comments, and summaries as secondary to the actual code.
+- For multi-function modules, cover the constants, validation branches, return shapes, and status values that appear in source. Do not introduce deployment, queue, database, endpoint, or environment-variable details unless the source explicitly contains them.
+- Do not add worked examples, sample user ids, sample payloads, inferred types, or derived numeric examples unless those exact values appear in the source evidence.
+- If a detail is not in the evidence, do not state it. For thin evidence, write a short accurate entry and explicitly note what is unspecified instead of padding.
 - Do not include raw README dumps, commit summaries, "Source context", or file lists as the manual.
 - Keep user-facing and admin-facing content distinct.
 

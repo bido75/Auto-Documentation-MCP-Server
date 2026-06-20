@@ -35,6 +35,7 @@ export function registerCaptureDevelopmentEventTool(server: McpServer) {
       filesChanged: z.string().optional(),
       diffSummary: z.string().optional(),
       testStatus: z.enum(["passed", "failed", "unknown", "not_run"]).optional(),
+      externalEventId: z.string().optional(),
       traceId: z.string().optional(),
     },
     async (input) => {
@@ -55,6 +56,41 @@ export function registerCaptureDevelopmentEventTool(server: McpServer) {
         const project = await store.getProject(input.projectId);
         if (!project) {
           throw new Error("Unknown projectId. Run initialize_project_manual first.");
+        }
+
+        const externalEventId = input.externalEventId?.trim() || `evt_${Date.now()}`;
+        const existingEvidencePageId = await store.getEvent(input.projectId, externalEventId);
+        if (existingEvidencePageId) {
+          logToolEvent({
+            level: "info",
+            tool: "capture_development_event",
+            stage: "duplicate",
+            traceId,
+            message: "Reused existing development evidence event",
+            data: {
+              projectId: input.projectId,
+              evidenceEventId: externalEventId,
+              durationMs: Date.now() - startedAt,
+            },
+          });
+
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(
+                  {
+                    traceId,
+                    evidenceEventId: externalEventId,
+                    evidencePageId: existingEvidencePageId,
+                    initialClassification: "duplicate",
+                  },
+                  null,
+                  2,
+                ),
+              },
+            ],
+          };
         }
 
         await runProjectPreflight({ notion, project });
@@ -101,7 +137,6 @@ export function registerCaptureDevelopmentEventTool(server: McpServer) {
         not_run: "Not Run",
         };
 
-        const externalEventId = `evt_${Date.now()}`;
         const payload = {
         parent: { database_id: project.databases.evidenceEventsDatabaseId },
         properties: {

@@ -1,4 +1,5 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { createHash } from "node:crypto";
 import { collectGitEvidence } from "../evidence/git.js";
 import { authorManualSection } from "../lib/manual-author.js";
 import { getStateStore, type ProjectState } from "../lib/state-store.js";
@@ -51,6 +52,7 @@ type CaptureInput = {
   diffSummary?: string;
   testStatus?: "passed" | "failed" | "unknown" | "not_run";
   traceId?: string;
+  externalEventId?: string;
 };
 
 type AnalyzeResponse = {
@@ -208,6 +210,28 @@ function normalizeFilesChanged(value: string[] | string | undefined): string[] {
   return [];
 }
 
+function buildExternalEventId(input: {
+  projectId: string;
+  repoPath?: string;
+  mode: AutonomousTriggerInput["mode"];
+  captureInput: Omit<CaptureInput, "externalEventId">;
+}): string {
+  const stableSignal = input.captureInput.commitSha
+    ? `${input.captureInput.source}:${input.captureInput.eventType}:${input.captureInput.commitSha}`
+    : [
+        input.captureInput.source,
+        input.captureInput.eventType,
+        input.repoPath ?? "",
+        input.mode,
+        input.captureInput.branch ?? "",
+        input.captureInput.summary,
+        input.captureInput.diffSummary ?? "",
+        input.captureInput.filesChanged ?? "",
+      ].join("\n");
+  const digest = createHash("sha256").update(`${input.projectId}\n${stableSignal}`).digest("hex").slice(0, 24);
+  return `evt_${input.captureInput.source}_${input.captureInput.eventType}_${digest}`;
+}
+
 function extractRoute(filesChanged: string[]): string[] {
   const routes = new Set<string>();
   for (const file of filesChanged) {
@@ -287,7 +311,7 @@ async function buildManualEntries(input: {
 async function buildCaptureInput(input: AutonomousTriggerInput): Promise<CaptureInput> {
   const filesChanged = normalizeFilesChanged(input.filesChanged);
   if (input.summary) {
-    return {
+    const captureInput: Omit<CaptureInput, "externalEventId"> = {
       projectId: input.projectId,
       source: normalizeSource(input.source),
       eventType: normalizeEventType(input.eventType, input.mode),
@@ -301,6 +325,16 @@ async function buildCaptureInput(input: AutonomousTriggerInput): Promise<Capture
       testStatus: normalizeTestStatus(input.testStatus),
       traceId: input.traceId,
     };
+
+    return {
+      ...captureInput,
+      externalEventId: buildExternalEventId({
+        projectId: input.projectId,
+        repoPath: input.repoPath,
+        mode: input.mode,
+        captureInput,
+      }),
+    };
   }
 
   if (!input.repoPath) {
@@ -309,15 +343,27 @@ async function buildCaptureInput(input: AutonomousTriggerInput): Promise<Capture
 
   const evidence = await collectGitEvidence({ repoPath: input.repoPath, mode: input.mode });
 
-  return {
+  const captureInput: Omit<CaptureInput, "externalEventId"> = {
     projectId: input.projectId,
     source: "local_git",
     eventType: evidence.eventType === "Commit" ? "commit" : "diff",
     summary: evidence.summary,
+    commitSha: evidence.commitSha,
     branch: evidence.branch,
     filesChanged: evidence.filesChanged.length > 0 ? evidence.filesChanged.join(", ") : undefined,
+    diffSummary: evidence.diffSummary,
     testStatus: normalizeTestStatus(input.testStatus),
     traceId: input.traceId,
+  };
+
+  return {
+    ...captureInput,
+    externalEventId: buildExternalEventId({
+      projectId: input.projectId,
+      repoPath: input.repoPath,
+      mode: input.mode,
+      captureInput,
+    }),
   };
 }
 
@@ -394,7 +440,7 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
       confidenceReasons: analysis.confidenceReasons,
       publishingMode,
       autoPublishThreshold: project.autoPublishThreshold,
-      sourceCommit: input.commitSha,
+      sourceCommit: captureInput.commitSha,
       sourcePr: input.prUrl,
       filesChanged: captureFilesChanged,
       traceId: input.traceId,

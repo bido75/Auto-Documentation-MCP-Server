@@ -275,6 +275,40 @@ function toTitleCase(input: string): string {
     .join(" ");
 }
 
+function titleFromFilePath(filePath: string): string {
+  const baseName = filePath
+    .replaceAll("\\", "/")
+    .split("/")
+    .pop()
+    ?.replace(/\.[a-z0-9]+$/i, "")
+    .trim();
+  const title = toTitleCase(baseName ?? "");
+  return title ? `${title} Helpers` : "Captured Feature Update";
+}
+
+function hasGitPlumbingFeatureName(input: string): boolean {
+  return (
+    /\bcommit\s+[a-f0-9]{7,40}\b/i.test(input) ||
+    /\bAuthor:/i.test(input) ||
+    /<[^>\s]+@[^>]+>/.test(input) ||
+    /[<>]/.test(input)
+  );
+}
+
+function inferCleanFeatureName(input: { providerFeatureName?: string; inferredFeatureName: string; filesChanged: string[] }): string {
+  const providerFeatureName = input.providerFeatureName?.trim();
+  if (providerFeatureName && !hasGitPlumbingFeatureName(providerFeatureName)) {
+    return providerFeatureName;
+  }
+
+  const primaryFile = input.filesChanged.find((filePath) => /\.(?:[cm]?[jt]sx?|tsx?|py|go|rs|java|cs)$/i.test(filePath)) ?? input.filesChanged[0];
+  if (primaryFile) {
+    return titleFromFilePath(primaryFile);
+  }
+
+  return hasGitPlumbingFeatureName(input.inferredFeatureName) ? "Captured Feature Update" : input.inferredFeatureName;
+}
+
 function inferFeatureNameFromEvidence(summaries: string[]): string {
   const first = summaries.find((summary) => summary.trim().length > 0) ?? "Captured Feature Update";
   const normalized = first
@@ -462,7 +496,11 @@ export async function analyzeDocumentationCandidate(input: AnalyzerInput): Promi
   const normalized = normalizeProviderOutput(rawModelAnalysis, structuredEvidence, inferredFeatureName);
   const guardrailResult = validateAndSanitize(normalized.analysis);
   const sanitizedAnalysis = guardrailResult.passed ? guardrailResult.sanitized : await deterministicProvider.analyze(structuredEvidence);
-  const resolvedFeatureName = sanitizedAnalysis.featureName?.trim() || inferredFeatureName;
+  const resolvedFeatureName = inferCleanFeatureName({
+    providerFeatureName: sanitizedAnalysis.featureName,
+    inferredFeatureName,
+    filesChanged,
+  });
   let resolvedFeatureKey = resolveAnalyzerFeatureKey({
     module: moduleName,
     featureName: resolvedFeatureName,

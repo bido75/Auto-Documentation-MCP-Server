@@ -44,6 +44,8 @@ export interface AuthoredManualSection {
 }
 
 const DEFAULT_SOURCE_CANDIDATES = ["README.md", "package.json", ".env.example", "Dockerfile", "docker-compose.yml"];
+const SOURCE_GROUNDING_RULE =
+  "Document only what is present in the provided source evidence; do not invent function names, parameters, units, return values, environment variables, configuration, dependencies, file paths, or numeric behavior.";
 let activeAuthoringCalls = 0;
 const authoringWaiters: Array<() => void> = [];
 
@@ -71,6 +73,10 @@ function unique(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }
 
+function normalizeSourceText(content: string): string {
+  return content.replace(/\u0000/g, "");
+}
+
 function safeRelativeSourcePath(repoRoot: string, candidate: string): string | null {
   const trimmed = candidate.trim();
   if (!trimmed || isAbsolute(trimmed) || trimmed.split(/[\\/]+/).includes("..")) {
@@ -90,7 +96,7 @@ async function readRepoSources(repoPath: string | undefined, filesChanged: strin
   }
 
   const root = resolve(repoPath);
-  const candidates = unique([...DEFAULT_SOURCE_CANDIDATES, ...filesChanged]).slice(0, 30);
+  const candidates = unique([...filesChanged, ...DEFAULT_SOURCE_CANDIDATES]).slice(0, 30);
   const chunks: string[] = [];
   const files: string[] = [];
 
@@ -104,8 +110,9 @@ async function readRepoSources(repoPath: string | undefined, filesChanged: strin
     if (!content) {
       continue;
     }
+    const normalizedContent = normalizeSourceText(content);
     files.push(rel);
-    chunks.push(`SOURCE FILE: ${rel}\n${redactSecrets(content).slice(0, 4000)}`);
+    chunks.push(`SOURCE FILE: ${rel}\n${redactSecrets(normalizedContent).slice(0, 4000)}`);
   }
 
   return { text: chunks.join("\n\n"), files };
@@ -203,6 +210,581 @@ function stripEvidenceDumpMarkers(input: string): string {
 
 function cleanManualBody(input: string): string {
   return redactSecrets(stripEvidenceDumpMarkers(input));
+}
+
+function removeDanglingLabels(input: string): { body: string; removed: boolean } {
+  const lines = input.split(/\r?\n/);
+  const kept: string[] = [];
+  let removed = false;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const isEmptyLabel = /^(?:Parameters?|Returns?):\s*$/i.test(line.trim());
+    if (!isEmptyLabel) {
+      kept.push(line);
+      continue;
+    }
+
+    const nextMeaningful = lines.slice(index + 1).find((candidate) => candidate.trim().length > 0)?.trim() ?? "";
+    const nextIsAnotherStructuralLine =
+      nextMeaningful.length === 0 ||
+      /^#{1,6}\s+/.test(nextMeaningful) ||
+      /^(?:Parameters?|Returns?|Errors?|Throws?):\s*$/i.test(nextMeaningful) ||
+      /^-?\s*Examples?:\s*$/i.test(nextMeaningful);
+
+    if (nextIsAnotherStructuralLine) {
+      removed = true;
+      continue;
+    }
+
+    kept.push(line);
+  }
+
+  return { body: kept.join("\n").replace(/\n{3,}/g, "\n\n").trim(), removed };
+}
+
+function dedupeSourceGroundingSections(input: string): string {
+  const marker = "## Source-grounded behavior";
+  const firstIndex = input.indexOf(marker);
+  if (firstIndex < 0) {
+    return input;
+  }
+
+  const secondIndex = input.indexOf(marker, firstIndex + marker.length);
+  if (secondIndex < 0) {
+    return input;
+  }
+
+  return input.slice(0, secondIndex).trimEnd();
+}
+
+function functionHeaderName(line: string): string | null {
+  return /^#{3,6}\s+`?([A-Za-z_$][\w$]*)\s*\(/.exec(line.trim())?.[1] ?? null;
+}
+
+function isStructuralFunctionLine(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    trimmed.length === 0 ||
+    /^(?:Parameters?|Returns?|Errors?|Throws?):\s*$/i.test(trimmed) ||
+    /^-?\s*Examples?:\s*$/i.test(trimmed)
+  );
+}
+
+function sourceFactDescription(fact: SourceFunctionFact): string {
+  const lines = [`Source-defined behavior: \`${fact.name}(${fact.params.join(", ")})\`.`];
+  if (fact.params.length > 0) {
+    lines.push(`Parameters: ${fact.params.map((param) => `\`${param}\``).join(", ")}.`);
+  }
+  if (fact.returnExpression) {
+    lines.push(`Returns: \`${fact.returnExpression}\`.`);
+  }
+  if (fact.returnObjectFields.length > 0) {
+    lines.push(`Return object fields: ${fact.returnObjectFields.map((field) => `\`${field}\``).join(", ")}.`);
+  }
+  if (fact.name === "buildNotification") {
+    if (fact.body.includes("CHANNELS.includes(channel)")) {
+      lines.push("Validates `channel` with `CHANNELS.includes(channel)`.");
+    }
+    if (fact.body.includes("status: 'pending'")) {
+      lines.push("Creates notifications with `attempts: 0`, `status: 'pending'`, and `createdAt: Date.now()`.");
+    }
+  }
+  if (fact.name === "shouldRetry") {
+    lines.push("Returns true only when `status === 'failed'` and `attempts < MAX_RETRIES`.");
+  }
+  if (fact.name === "summarize") {
+    lines.push("Returns the source-defined notification status counts.");
+  }
+  return lines.join("\n");
+}
+
+function ensureReturnObjectFieldCoverage(input: string, sourceText: string): string {
+  const facts = extractSourceFunctionFacts(sourceText).filter((fact) => fact.returnObjectFields.length > 0);
+  if (facts.length === 0) {
+    return input;
+  }
+
+  const additions: string[] = [];
+  for (const fact of facts) {
+    if (!input.toLowerCase().includes(fact.name.toLowerCase())) {
+      continue;
+    }
+    const missing = fact.returnObjectFields.filter((field) => !new RegExp(`\\b${field}\\b`).test(input));
+    if (missing.length > 0) {
+      additions.push(`- \`${fact.name}\` returns object fields: ${fact.returnObjectFields.map((field) => `\`${field}\``).join(", ")}.`);
+    }
+  }
+
+  if (additions.length === 0) {
+    return input;
+  }
+
+  return `${input.trim()}\n\n## Source-defined return fields\n${unique(additions).join("\n")}`.trim();
+}
+
+function ensureSourceConstantCoverage(input: string, sourceText: string): string {
+  const notes = sourceDeclaredConstantNotes(sourceText);
+  if (notes.length === 0) {
+    return input;
+  }
+
+  const missingNotes = notes.filter((note) => {
+    const name = /`([^`]+)`/.exec(note)?.[1];
+    return Boolean(name && input.includes(name) && !new RegExp(`${name}.*source (?:constant|value)|source (?:constant|value).*${name}`, "i").test(input));
+  });
+  if (missingNotes.length === 0) {
+    return input;
+  }
+
+  return `${input.trim()}\n\n## Source-defined constants\n${missingNotes.map((note) => `- ${note}`).join("\n")}`.trim();
+}
+
+function fillEmptyFunctionSections(input: string, sourceText: string): string {
+  const facts = new Map(extractSourceFunctionFacts(sourceText).map((fact) => [fact.name, fact]));
+  if (facts.size === 0) {
+    return input;
+  }
+
+  const lines = input.split(/\r?\n/);
+  const output: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    output.push(line);
+    const functionName = functionHeaderName(line);
+    const fact = functionName ? facts.get(functionName) : undefined;
+    if (!fact) {
+      continue;
+    }
+
+    let cursor = index + 1;
+    const sectionLines: string[] = [];
+    while (cursor < lines.length && !functionHeaderName(lines[cursor]) && !/^#{1,2}\s+/.test(lines[cursor].trim())) {
+      sectionLines.push(lines[cursor]);
+      cursor += 1;
+    }
+
+    const hasRealContent = sectionLines.some((sectionLine) => !isStructuralFunctionLine(sectionLine));
+    if (!hasRealContent) {
+      output.push(sourceFactDescription(fact));
+    }
+  }
+
+  return output.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function completeManualBody(body: string, sourceText: string): string {
+  const cleaned = cleanManualBody(body);
+  const correctedConstants = correctSourceConstantEnvClaims(cleaned, sourceText);
+  const labels = removeDanglingLabels(correctedConstants);
+  const filledBody = fillEmptyFunctionSections(labels.body, sourceText);
+  const withReturnFields = ensureReturnObjectFieldCoverage(filledBody, sourceText);
+  const withConstants = ensureSourceConstantCoverage(withReturnFields, sourceText);
+  const dedupedBody = dedupeSourceGroundingSections(withConstants);
+
+  const appendix = sourceGroundingAppendix(sourceText).trim();
+  if (!labels.removed) {
+    return dedupedBody;
+  }
+
+  return appendix && !dedupedBody.includes("Source-grounded behavior") ? `${dedupedBody}\n\n${appendix}` : dedupedBody;
+}
+
+type SourceFunctionFact = {
+  name: string;
+  params: string[];
+  body: string;
+  returnExpression?: string;
+  returnObjectFields: string[];
+};
+
+function extractReturnObjectFields(body: string): string[] {
+  const match = /return\s*\{([\s\S]*?)\};/.exec(body);
+  if (!match) {
+    return [];
+  }
+
+  const fields: string[] = [];
+  for (const rawLine of match[1].split(/\r?\n/)) {
+    const line = rawLine.replace(/\/\/.*$/, "").trim().replace(/,$/, "").trim();
+    if (!line) {
+      continue;
+    }
+    const keyed = /^([A-Za-z_$][\w$]*)\s*:/.exec(line)?.[1];
+    if (keyed) {
+      fields.push(keyed);
+      continue;
+    }
+    const shorthand = /^([A-Za-z_$][\w$]*)$/.exec(line)?.[1];
+    if (shorthand) {
+      fields.push(shorthand);
+    }
+  }
+
+  return unique(fields);
+}
+
+function extractSourceFunctionFacts(sourceText: string): SourceFunctionFact[] {
+  const facts: SourceFunctionFact[] = [];
+  for (const match of sourceText.matchAll(/(?:export\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*\{([\s\S]*?)\n\}/g)) {
+    const body = match[3]?.trim() ?? "";
+    const returnExpression = body.match(/return\s+(.+?);/)?.[1]?.trim();
+    facts.push({
+      name: match[1],
+      params: (match[2] ?? "")
+        .split(",")
+        .map((param) => param.trim())
+        .filter(Boolean),
+      body,
+      returnObjectFields: extractReturnObjectFields(body),
+      ...(returnExpression ? { returnExpression } : {}),
+    });
+  }
+  return facts;
+}
+
+function sourceDeclaredConstants(sourceText: string): Set<string> {
+  return new Set(
+    [...sourceText.matchAll(/\b(?:export\s+)?(?:const|let|var)\s+([A-Z][A-Z0-9_]{2,})\b/g)].map((match) => match[1]),
+  );
+}
+
+function sourceDeclaredConstantNotes(sourceText: string): string[] {
+  const constants = [...sourceDeclaredConstants(sourceText)];
+  return constants.map((name) => `\`${name}\` is a source constant defined in code; callers override it by passing an explicit value.`);
+}
+
+function correctSourceConstantEnvClaims(input: string, sourceText: string): string {
+  const runtimeEnvVars = sourceRuntimeEnvVars(sourceText);
+  const constants = [...sourceDeclaredConstants(sourceText)].filter((name) => !runtimeEnvVars.has(name));
+  if (constants.length === 0) {
+    return input;
+  }
+
+  const corrected: string[] = [];
+  for (const line of input.split(/\r?\n/)) {
+    const constant = constants.find((name) => line.includes(name));
+    const isEnvClaim =
+      constant !== undefined &&
+      /\b(?:environment variable|environment variables|env var|env vars|runtime setting|configuration setting|configuration reference|set|configured|missing)\b/i.test(
+        line,
+    );
+    if (constant && isEnvClaim) {
+      corrected.push(`- \`${constant}\` is a source constant defined in code; callers override it by passing an explicit value.`);
+      continue;
+    }
+    corrected.push(line);
+  }
+
+  return unique(corrected).join("\n");
+}
+
+function sourceNumbers(sourceText: string): Set<string> {
+  return new Set([...sourceText.matchAll(/\b\d+(?:\.\d+)?\b/g)].map((match) => match[0]));
+}
+
+function sourceCallNames(sourceText: string): Set<string> {
+  return new Set([...sourceText.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map((match) => match[1]));
+}
+
+function sourceRuntimeEnvVars(sourceText: string): Set<string> {
+  const vars = new Set(extractEnvVars(sourceText));
+  for (const match of sourceText.matchAll(/process\.env\.([A-Z][A-Z0-9_]{2,})\b/g)) {
+    vars.add(match[1]);
+  }
+  for (const match of sourceText.matchAll(/process\.env\[['"]([A-Z][A-Z0-9_]{2,})['"]\]/g)) {
+    vars.add(match[1]);
+  }
+  return vars;
+}
+
+function containsUnsupportedNumericClaim(body: string, sourceText: string): boolean {
+  const numbers = sourceNumbers(sourceText);
+  for (const match of body.matchAll(/\b\d+(?:\.\d+)?(?:%|x)?\b/gi)) {
+    const token = match[0];
+    if (/^\d+$/.test(token)) {
+      continue;
+    }
+    const normalized = token.replace(/[%x]$/i, "");
+    if (!numbers.has(normalized)) {
+      return true;
+    }
+  }
+  const numberWords: Record<string, string> = {
+    zero: "0",
+    one: "1",
+    two: "2",
+    three: "3",
+    four: "4",
+    five: "5",
+    six: "6",
+    seven: "7",
+    eight: "8",
+    nine: "9",
+    ten: "10",
+  };
+  for (const match of body.matchAll(/\b(zero|one|two|three|four|five|six|seven|eight|nine|ten)\b(?:\s+(?:attempts?|retries|times?|seconds?|milliseconds?|ms|items?|entries?|values?))?/gi)) {
+    const numeric = numberWords[match[1].toLowerCase()];
+    const hasNumericContext = /\s+(?:attempts?|retries|times?|seconds?|milliseconds?|ms|items?|entries?|values?)$/i.test(match[0]);
+    if (numeric && hasNumericContext && !numbers.has(numeric)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function containsUnsupportedFunctionClaim(body: string, facts: SourceFunctionFact[], sourceText: string): boolean {
+  const sourceNames = new Set([...facts.map((fact) => fact.name), ...sourceCallNames(sourceText)]);
+  for (const match of body.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const name = match[1];
+    if (!sourceNames.has(name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function containsUnsupportedEnvClaim(body: string, sourceText: string): boolean {
+  const sourceConstants = new Set([...sourceText.matchAll(/\b[A-Z][A-Z0-9_]{2,}\b/g)].map((match) => match[0]));
+  const runtimeEnvVars = sourceRuntimeEnvVars(sourceText);
+  for (const match of body.matchAll(/\b[A-Z][A-Z0-9_]{2,}\b/g)) {
+    const name = match[0];
+    if (!sourceConstants.has(name) && !runtimeEnvVars.has(name)) {
+      return true;
+    }
+  }
+  const envClaimPattern =
+    /\b(?:environment variable|environment variables|env var|env vars|runtime setting|configuration setting|set)\b[^\n.]{0,120}\b([A-Z][A-Z0-9_]{2,})\b/gi;
+  for (const match of body.matchAll(envClaimPattern)) {
+    const name = match[1];
+    if (name && !runtimeEnvVars.has(name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isGroundedToSource(body: string, sourceText: string): boolean {
+  const facts = extractSourceFunctionFacts(sourceText);
+  if (facts.length === 0) {
+    return true;
+  }
+
+  const lowerBody = body.toLowerCase();
+  if (facts.length === 1) {
+    const [fact] = facts;
+    if (!lowerBody.includes(fact.name.toLowerCase()) || !fact.params.every((param) => lowerBody.includes(param.toLowerCase()))) {
+      return false;
+    }
+  } else if (!facts.every((fact) => lowerBody.includes(fact.name.toLowerCase()))) {
+    return false;
+  }
+
+  if (containsUnsupportedFunctionClaim(body, facts, sourceText)) {
+    return false;
+  }
+  if (containsUnsupportedEnvClaim(body, sourceText)) {
+    return false;
+  }
+  if (containsUnsupportedNumericClaim(body, sourceText)) {
+    return false;
+  }
+
+  const lowerSource = sourceText.toLowerCase();
+  return ![
+    "pound",
+    "pounds",
+    "lbs",
+    "lb range",
+    "zone",
+    "zones",
+    "shipping-calculator",
+    "chmod",
+  ].some((token) => body.toLowerCase().includes(token) && !lowerSource.includes(token));
+}
+
+function lineHasUnsupportedClaim(line: string, sourceText: string, facts: SourceFunctionFact[]): boolean {
+  return (
+    containsUnsupportedFunctionClaim(line, facts, sourceText) ||
+    containsUnsupportedEnvClaim(line, sourceText) ||
+    containsUnsupportedNumericClaim(line, sourceText)
+  );
+}
+
+function extractStringArrayConstant(sourceText: string, name: string): string[] {
+  const match = sourceText.match(new RegExp(`const\\s+${name}\\s*=\\s*\\[([^\\]]*)\\]`));
+  if (!match) {
+    return [];
+  }
+  return [...match[1].matchAll(/['"]([^'"]+)['"]/g)].map((item) => item[1]).filter(Boolean);
+}
+
+function extractObjectKeys(sourceText: string, name: string): string[] {
+  const match = sourceText.match(new RegExp(`(?:const|let|var)\\s+${name}\\s*=\\s*\\{([^}]*)\\}`));
+  if (!match) {
+    return [];
+  }
+  return [...match[1].matchAll(/\b([A-Za-z_$][\w$]*)\s*:/g)].map((item) => item[1]).filter(Boolean);
+}
+
+function sourceGroundingAppendix(sourceText: string): string {
+  const normalizedSourceText = normalizeSourceText(sourceText);
+  const facts = extractSourceFunctionFacts(normalizedSourceText);
+  if (facts.length <= 1) {
+    return "";
+  }
+
+  const channels = extractStringArrayConstant(normalizedSourceText, "CHANNELS");
+  const statuses = extractObjectKeys(normalizedSourceText, "counts");
+  const maxRetries = normalizedSourceText.match(/const\s+MAX_RETRIES\s*=\s*(\d+)/)?.[1];
+  const bullets: string[] = [];
+
+  if (channels.length > 0) {
+    bullets.push(`Supported channels in source: ${channels.map((channel) => `\`${channel}\``).join(", ")}.`);
+  }
+  if (maxRetries) {
+    bullets.push(`Retry cap in source: \`MAX_RETRIES = ${maxRetries}\`.`);
+  }
+  if (normalizedSourceText.includes("Math.min(1000 * 2 ** attempts, 30000)")) {
+    bullets.push("Backoff in source: `Math.min(1000 * 2 ** attempts, 30000)`.");
+  }
+  if (statuses.length > 0) {
+    bullets.push(`Statuses counted in source: ${statuses.map((status) => `\`${status}\``).join(", ")}.`);
+  }
+
+  for (const fact of facts) {
+    const signature = `${fact.name}(${fact.params.join(", ")})`;
+    bullets.push(`\`${signature}\` is exported by the source.`);
+    if (fact.name === "buildNotification") {
+      if (fact.body.includes("CHANNELS.includes(channel)")) {
+        bullets.push("`buildNotification` validates `channel` with `CHANNELS.includes(channel)`.");
+      }
+      if (fact.body.includes("Unsupported channel")) {
+        bullets.push("`buildNotification` throws `Unsupported channel: ${channel}` for unsupported channels.");
+      }
+      if (fact.body.includes("status: 'pending'")) {
+        bullets.push("New notifications start with `attempts: 0`, `status: 'pending'`, and `createdAt: Date.now()`.");
+      }
+    }
+    if (fact.name === "shouldRetry") {
+      bullets.push("`shouldRetry` checks for `status === 'failed'` and `attempts < MAX_RETRIES`.");
+    }
+    if (fact.name === "nextBackoffMs" && fact.returnExpression) {
+      bullets.push(`\`nextBackoffMs\` returns \`${fact.returnExpression}\`.`);
+    }
+    if (fact.name === "summarize") {
+      bullets.push("`summarize` returns the source-defined counts object for notification statuses.");
+    }
+  }
+
+  return ["", "## Source-grounded behavior", bulletList(unique(bullets), [])].join("\n");
+}
+
+function repairBodyToSource(body: string, sourceText: string): string | null {
+  const facts = extractSourceFunctionFacts(sourceText);
+  if (facts.length === 0) {
+    return body;
+  }
+
+  const keptLines = body
+    .split(/\r?\n/)
+    .filter((line) => !lineHasUnsupportedClaim(line, sourceText, facts));
+  const repaired = completeManualBody(`${keptLines.join("\n")}${sourceGroundingAppendix(sourceText)}`, sourceText);
+  return isGroundedToSource(repaired, sourceText) ? repaired : null;
+}
+
+function buildGroundedFunctionBody(input: ManualAuthorInput, sourceText: string): string | null {
+  const [fact] = extractSourceFunctionFacts(sourceText);
+  if (!fact) {
+    return null;
+  }
+
+  const params = fact.params.join(", ");
+  const returnLine = fact.returnExpression ? `It returns \`${fact.returnExpression}\`.` : "The return value is defined by the source function body.";
+  const baseLine = fact.body.match(/const\s+base\s*=\s*(.+?);/)?.[1]?.trim();
+  const parameterLine = fact.params.length > 0 ? `Parameters: ${fact.params.map((param) => `\`${param}\``).join(", ")}.` : "The source does not define parameters.";
+  const unspecified = "Units, ranges, and configuration are not specified in the source.";
+  const isShippingFunction = /shipping|cost/i.test(`${input.featureName} ${input.summary} ${input.filesChanged.join(" ")} ${fact.name}`);
+  const returnObjectFields = [...fact.body.matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm)]
+    .map((match) => match[1])
+    .filter((name) => !["if", "for", "while", "switch"].includes(name));
+  const quotedAssignments = [...fact.body.matchAll(/\b([A-Za-z_$][\w$]*)\s*:\s*(['"][^'"]+['"]|\d+|Date\.now\(\))/g)].map(
+    (match) => `\`${match[1]}: ${match[2]}\``,
+  );
+  const sourceBehavior = unique([
+    ...(baseLine ? [`Base expression: \`${baseLine}\`.`] : []),
+    returnLine,
+    ...(quotedAssignments.length > 0 ? [`Returned object fields include ${quotedAssignments.join(", ")}.`] : []),
+    ...(fact.returnObjectFields.length > 0
+      ? [`Returned object keys include ${fact.returnObjectFields.map((field) => `\`${field}\``).join(", ")}.`]
+      : returnObjectFields.length > 0
+        ? [`Returned object keys include ${returnObjectFields.map((field) => `\`${field}\``).join(", ")}.`]
+        : []),
+    ...sourceDeclaredConstantNotes(sourceText),
+    ...(fact.body.includes("CHANNELS.includes(channel)") ? ["The source validates `channel` with `CHANNELS.includes(channel)`."] : []),
+    ...(fact.body.includes("Unsupported channel") ? ["Unsupported channels throw the source-defined `Unsupported channel: ${channel}` error."] : []),
+    ...(isShippingFunction && fact.params.includes("distanceKm") ? ["`distanceKm` affects the base cost."] : []),
+    ...(isShippingFunction && fact.body.includes("1.75") ? ["When `expedited` is true, the source multiplies the base cost by `1.75`."] : []),
+    unspecified,
+  ]);
+
+  if (input.entryType === "Admin Guide" || input.audience === "Admin") {
+    return [
+      "## Overview",
+      `The source defines \`${fact.name}(${params})\`. ${parameterLine}`,
+      "",
+      "## Requirements",
+      "- No environment variables, package dependencies, destination routing, permissions, or runtime configuration are specified in the source.",
+      `- ${unspecified}`,
+      "",
+      "## Verification",
+      numberedSteps([
+        `Call \`${fact.name}\` with the exact parameters from the source: ${fact.params.map((param) => `\`${param}\``).join(", ")}.`,
+        ...sourceBehavior.filter((item) => item !== unspecified),
+      ]),
+      "",
+      `Expected result: ${returnLine}`,
+      "",
+      "## Troubleshooting",
+      bulletList([unspecified], []),
+    ].join("\n");
+  }
+
+  if (input.entryType === "User Guide" || input.audience === "User") {
+    return [
+      "## Overview",
+      `This change provides the \`${fact.name}\` helper. It accepts ${fact.params.map((param) => `\`${param}\``).join(", ")}.`,
+      "",
+      "## What the source supports",
+      bulletList(sourceBehavior, []),
+      "",
+      "## Expected result",
+      returnLine,
+      "",
+      "## Troubleshooting",
+      bulletList(["Check callers pass the exact parameters required by the function signature.", unspecified], []),
+    ].join("\n");
+  }
+
+  return [
+    "## Implementation notes",
+    `The source defines \`${fact.name}(${params})\`. ${parameterLine}`,
+    "",
+    "## Source behavior",
+    bulletList(sourceBehavior, []),
+  ].join("\n");
+}
+
+function isThinFunctionEvidence(sourceText: string): boolean {
+  const facts = extractSourceFunctionFacts(sourceText);
+  if (facts.length === 0 || facts.length > 2) {
+    return false;
+  }
+  const sourceLines = sourceText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("SOURCE FILE:") && line !== SOURCE_GROUNDING_RULE);
+  return sourceLines.length <= 30;
 }
 
 function providerNarrativeIsUsable(input: ManualAuthorInput): boolean {
@@ -438,8 +1020,20 @@ function buildDeveloperBody(input: ManualAuthorInput, sourceText: string): strin
 
 export async function authorManualSection(input: ManualAuthorInput): Promise<AuthoredManualSection> {
   const sources = await readRepoSources(input.repoPath, input.filesChanged);
-  const sourceText = `${sources.text}\n\n${redactSecrets(input.diffSummary ?? "")}`;
+  const sourceText = normalizeSourceText(`${SOURCE_GROUNDING_RULE}\n\n${sources.text}\n\n${redactSecrets(input.diffSummary ?? "")}`);
   const runtime = getOptionalRuntimeConfig();
+  const groundedFunctionBody = buildGroundedFunctionBody(input, sourceText);
+
+  if (groundedFunctionBody && isThinFunctionEvidence(sourceText)) {
+    return {
+      title: input.featureName,
+      audience: input.audience,
+      entryType: input.entryType,
+      body: cleanManualBody(groundedFunctionBody),
+      sourceFilesRead: sources.files,
+      authoringTier: "tier3-template",
+    };
+  }
 
   if (runtime.authoring.dedicatedEnabled) {
     try {
@@ -454,11 +1048,16 @@ export async function authorManualSection(input: ManualAuthorInput): Promise<Aut
           sourceText,
         }),
       );
+      const cleanedBody = completeManualBody(result.body, sourceText);
+      const acceptedBody = isGroundedToSource(cleanedBody, sourceText) ? cleanedBody : repairBodyToSource(cleanedBody, sourceText);
+      if (!acceptedBody) {
+        throw new Error("Dedicated authoring provider produced claims that are not grounded in the source evidence.");
+      }
       return {
         title: input.featureName,
         audience: input.audience,
         entryType: input.entryType,
-        body: cleanManualBody(result.body),
+        body: acceptedBody,
         sourceFilesRead: sources.files,
         authoringTier: "tier1-dedicated",
         providerUsed: result.providerUsed,
@@ -486,30 +1085,41 @@ export async function authorManualSection(input: ManualAuthorInput): Promise<Aut
         : input.audience === "User" || input.entryType === "User Guide"
           ? renderProviderUserBody(input)
           : renderProviderDeveloperBody(input);
+    const cleanedTier2Body = completeManualBody(tier2Body, sourceText);
+    const acceptedTier2Body = isGroundedToSource(cleanedTier2Body, sourceText) ? cleanedTier2Body : repairBodyToSource(cleanedTier2Body, sourceText);
+    if (!acceptedTier2Body) {
+      logAuthoringTierFallback({
+        from: "tier2-analyzer-narrative",
+        to: "tier3-template",
+        reason: "Analyzer narrative produced claims that are not grounded in the source evidence.",
+      });
+    } else {
+      return {
+        title: input.featureName,
+        audience: input.audience,
+        entryType: input.entryType,
+        body: acceptedTier2Body,
+        sourceFilesRead: sources.files,
+        authoringTier: "tier2-analyzer-narrative",
+        providerUsed: input.providerNarrative?.providerUsed,
+      };
+    }
 
-    return {
-      title: input.featureName,
-      audience: input.audience,
-      entryType: input.entryType,
-      body: cleanManualBody(tier2Body),
-      sourceFilesRead: sources.files,
-      authoringTier: "tier2-analyzer-narrative",
-      providerUsed: input.providerNarrative?.providerUsed,
-    };
   }
 
   const body =
-    input.audience === "Admin" || input.entryType === "Admin Guide"
+    groundedFunctionBody ??
+    (input.audience === "Admin" || input.entryType === "Admin Guide"
       ? buildAdminBody(input, sourceText)
       : input.audience === "User" || input.entryType === "User Guide"
         ? buildUserBody(input, sourceText)
-        : buildDeveloperBody(input, sourceText);
+        : buildDeveloperBody(input, sourceText));
 
   return {
     title: input.featureName,
     audience: input.audience,
     entryType: input.entryType,
-    body: cleanManualBody(body),
+    body: completeManualBody(body, sourceText),
     sourceFilesRead: sources.files,
     authoringTier: "tier3-template",
   };

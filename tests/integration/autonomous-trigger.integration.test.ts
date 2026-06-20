@@ -246,17 +246,25 @@ describe("run_autonomous_documentation_trigger", () => {
         })
         .filter(Boolean)
         .join("\n");
-      expect(manualText).toContain("## Overview");
-      expect(manualText).toContain("## Step-by-step setup");
+      expect(manualText).toContain("Overview");
+      expect(manualText).toContain("Step-by-step setup");
+      expect(manualText).not.toContain("## Overview");
       expect(manualText).toContain("Expected result:");
       expect(manualText).not.toContain("Repo evidence excerpt:");
       expect(manualText).not.toMatch(/Files changed:\s*\n- /);
 
-      const second = parseTool<{ disposition: string; upsert: { featureId: string; manualEntryIds: string[] } | null }>(await handler!(input));
+      const second = parseTool<{
+        disposition: string;
+        capture: { evidenceEventId: string; evidencePageId: string; initialClassification: string };
+        upsert: { featureId: string; manualEntryIds: string[] } | null;
+      }>(await handler!(input));
       expect(second.disposition).toBe("duplicate");
+      expect(second.capture.evidenceEventId).toBe(first.capture.evidenceEventId);
+      expect(second.capture.initialClassification).toBe("duplicate");
       expect(second.upsert).toBeNull();
 
       const pagesAfterSecond = Array.from(testContext.notion._pages.values()) as FakePage[];
+      expect(pagesAfterSecond.filter((page) => page.parent.database_id === "events_db")).toHaveLength(1);
       expect(pagesAfterSecond.filter((page) => page.parent.database_id === "features_db")).toHaveLength(1);
       expect(pagesAfterSecond.filter((page) => page.parent.database_id === "manual_entries_db")).toHaveLength(1);
     } finally {

@@ -16,6 +16,7 @@ export type OpenAIProviderOptions = {
   endpoint?: string;
   apiKey?: string;
   modelName?: string;
+  timeoutMs?: number;
 };
 
 export class OpenAIProvider implements ModelProvider {
@@ -26,6 +27,7 @@ export class OpenAIProvider implements ModelProvider {
   private readonly endpoint: string;
   private readonly apiKey?: string;
   private readonly modelName?: string;
+  private readonly timeoutMs: number;
 
   constructor(options: OpenAIProviderOptions = {}) {
     const runtime = resolveOptionalRuntimeConfig();
@@ -33,6 +35,7 @@ export class OpenAIProvider implements ModelProvider {
     this.endpoint = options.endpoint ?? runtime.provider.endpoint;
     this.apiKey = options.apiKey ?? runtime.provider.apiKey;
     this.modelName = options.modelName ?? runtime.provider.modelName;
+    this.timeoutMs = options.timeoutMs ?? runtime.provider.timeoutMs;
     this.displayName = options.displayName ?? `OpenAI (${this.modelName})`;
     const maybeBifrostHeaders = this.endpoint.includes("bifrost")
       ? {
@@ -43,7 +46,7 @@ export class OpenAIProvider implements ModelProvider {
     this.client = new OpenAI({
       apiKey: this.apiKey,
       baseURL: this.endpoint,
-      timeout: runtime.provider.timeoutMs,
+      timeout: this.timeoutMs,
       maxRetries: runtime.provider.maxRetries,
       ...(maybeBifrostHeaders ? { defaultHeaders: maybeBifrostHeaders } : {}),
     });
@@ -73,6 +76,21 @@ export class OpenAIProvider implements ModelProvider {
     const content = response.choices[0]?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as ModelAnalysis;
     return { ...parsed, providerUsed: `${this.id}:${this.modelName ?? runtime.provider.modelName}`, generationMs: Date.now() - startedAt };
+  }
+
+  async preflightGenerate(): Promise<string> {
+    const runtime = resolveOptionalRuntimeConfig();
+    const model = this.modelName ?? runtime.provider.modelName;
+    const response = await this.client.chat.completions.create({
+      model,
+      temperature: 0,
+      max_tokens: 4,
+      messages: [
+        { role: "system", content: "Reply with OK only." },
+        { role: "user", content: "Reply OK." },
+      ],
+    });
+    return response.choices[0]?.message?.content?.trim() ?? "";
   }
 
   async authorManualSection(input: ManualAuthoringProviderInput): Promise<ManualAuthoringProviderResult> {
