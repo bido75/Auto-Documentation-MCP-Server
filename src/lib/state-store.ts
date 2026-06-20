@@ -1,6 +1,9 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
+import { existsSync } from "node:fs";
 import { copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getOptionalRuntimeConfig } from "../config.js";
 import type { VisualEvidence } from "./visual-evidence.js";
 
@@ -78,6 +81,9 @@ interface StateShape {
 
 const DEFAULT_STATE: StateShape = { schemaVersion: CURRENT_STATE_SCHEMA_VERSION, projects: {} };
 const mutationQueues = new Map<string, Promise<void>>();
+const CANONICAL_STATE_DIRECTORY = ".auto-doc-mcp";
+const CANONICAL_STATE_FILE = "state.json";
+const KNOWN_LEGACY_STATE_FILE = "autonomy-test.state.json";
 
 interface StateEnvelope {
   schemaVersion: number;
@@ -111,8 +117,78 @@ interface LegacyStateShape {
   projects?: Record<string, LegacyProjectState>;
 }
 
+export interface StateStorePathResolution {
+  filePath: string;
+  explicitOverride: boolean;
+  canonical: boolean;
+  legacyStateFile: string;
+}
+
+export interface StateStorePathOptions {
+  cwd?: string;
+  homeDir?: string;
+}
+
+interface StateStoreOptions extends StateStorePathOptions {
+  legacyStateFile?: string;
+}
+
+function findPackageRoot(startDir = dirname(fileURLToPath(import.meta.url))): string {
+  let candidate = startDir;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (existsSync(resolve(candidate, "package.json"))) {
+      return candidate;
+    }
+
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      break;
+    }
+    candidate = parent;
+  }
+
+  return process.cwd();
+}
+
+export function resolveStateStorePath(
+  env: NodeJS.ProcessEnv = process.env,
+  options: StateStorePathOptions = {},
+): StateStorePathResolution {
+  const legacyRoot = options.cwd ?? findPackageRoot();
+  const homeDir = options.homeDir ?? homedir();
+  const override = env.AUTO_DOC_STATE_FILE?.trim();
+  const legacyStateFile = resolve(legacyRoot, KNOWN_LEGACY_STATE_FILE);
+
+  if (override) {
+    return {
+      filePath: resolve(override),
+      explicitOverride: true,
+      canonical: false,
+      legacyStateFile,
+    };
+  }
+
+  return {
+    filePath: resolve(homeDir, CANONICAL_STATE_DIRECTORY, CANONICAL_STATE_FILE),
+    explicitOverride: false,
+    canonical: true,
+    legacyStateFile,
+  };
+}
+
 function computeChecksum(state: StateShape): string {
   return createHash("sha256").update(JSON.stringify(state)).digest("hex");
+}
+
+function createDefaultState(): StateShape {
+  return {
+    schemaVersion: DEFAULT_STATE.schemaVersion,
+    projects: {},
+  };
+}
+
+function computeBytesChecksum(data: Buffer): string {
+  return createHash("sha256").update(data).digest("hex");
 }
 
 function encryptState(data: string, key: string): string {
@@ -213,38 +289,99 @@ async function runExclusive<T>(filePath: string, operation: () => Promise<T>): P
 }
 
 export class StateStore {
-  constructor(private readonly filePath = ".auto-doc/state.json") {}
+  private readonly filePath: string;
+  private readonly allowLegacyMigration: boolean;
+  private readonly legacyStateFile: string;
+
+  constructor(filePath?: string, options: StateStoreOptions = {}) {
+    const resolution = filePath
+      ? {
+          filePath: resolve(filePath),
+          explicitOverride: true,
+          canonical: false,
+          legacyStateFile: resolve(options.cwd ?? process.cwd(), KNOWN_LEGACY_STATE_FILE),
+        }
+      : resolveStateStorePath(process.env, options);
+
+    this.filePath = resolution.filePath;
+    this.allowLegacyMigration = !resolution.explicitOverride && resolution.canonical;
+    this.legacyStateFile = options.legacyStateFile ? resolve(options.legacyStateFile) : resolution.legacyStateFile;
+  }
 
   async load(): Promise<StateShape> {
     return this.loadFromPath(this.filePath);
   }
 
+  private parseStateContents(raw: string): { state: StateShape; changed: boolean } {
+    const parsed = JSON.parse(raw) as LegacyStateShape | StateEnvelope;
+    let source: LegacyStateShape;
+
+    if (isStateEnvelope(parsed)) {
+      const stateData = parsed.encryptedState
+        ? (JSON.parse(decryptState(parsed.encryptedState, getOptionalRuntimeConfig().stateEncryptionKey)) as LegacyStateShape)
+        : (parsed.state as LegacyStateShape | undefined);
+
+      if (!stateData) {
+        throw new Error("State file is missing persisted state data.");
+      }
+
+      const checksum = computeChecksum(stateData as StateShape);
+      if (checksum !== parsed.checksum) {
+        throw new Error("State file checksum mismatch. The local state file may be corrupted.");
+      }
+
+      source = stateData;
+    } else {
+      source = parsed;
+    }
+
+    const { migrated, changed } = migrateState(source);
+    return { state: migrated, changed };
+  }
+
+  private async tryMigrateKnownLegacyState(): Promise<StateShape | null> {
+    let legacyBytes: Buffer;
+    try {
+      legacyBytes = await readFile(this.legacyStateFile);
+    } catch (error) {
+      const asNodeError = error as NodeJS.ErrnoException;
+      if (asNodeError.code === "ENOENT") {
+        return null;
+      }
+
+      throw new Error(`PROJECT_STATE_MIGRATION_FAILED: Could not read known legacy state '${this.legacyStateFile}': ${asNodeError.message}`);
+    }
+
+    let parsedLegacy: StateShape;
+    try {
+      parsedLegacy = this.parseStateContents(legacyBytes.toString("utf8")).state;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`PROJECT_STATE_MIGRATION_FAILED: Known legacy state '${this.legacyStateFile}' is not usable: ${message}`);
+    }
+
+    await mkdir(dirname(this.filePath), { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const sourceBackupPath = resolve(dirname(this.filePath), `state.migration-source.${timestamp}.bak`);
+    await copyFile(this.legacyStateFile, sourceBackupPath);
+    await copyFile(this.legacyStateFile, this.filePath);
+
+    const sourceHash = computeBytesChecksum(legacyBytes);
+    const copiedHash = computeBytesChecksum(await readFile(this.filePath));
+    if (sourceHash !== copiedHash) {
+      await unlink(this.filePath).catch(() => undefined);
+      throw new Error(
+        `PROJECT_STATE_MIGRATION_FAILED: Canonical state checksum mismatch after copying '${this.legacyStateFile}' to '${this.filePath}'.`,
+      );
+    }
+
+    return parsedLegacy;
+  }
+
   private async loadFromPath(filePath: string): Promise<StateShape> {
     try {
       const raw = await readFile(filePath, "utf8");
-      const parsed = JSON.parse(raw) as LegacyStateShape | StateEnvelope;
-      let source: LegacyStateShape;
-
-      if (isStateEnvelope(parsed)) {
-        const stateData = parsed.encryptedState
-          ? (JSON.parse(decryptState(parsed.encryptedState, getOptionalRuntimeConfig().stateEncryptionKey)) as LegacyStateShape)
-          : (parsed.state as LegacyStateShape | undefined);
-
-        if (!stateData) {
-          throw new Error("State file is missing persisted state data.");
-        }
-
-        const checksum = computeChecksum(stateData as StateShape);
-        if (checksum !== parsed.checksum) {
-          throw new Error("State file checksum mismatch. The local state file may be corrupted.");
-        }
-
-        source = stateData;
-      } else {
-        source = parsed;
-      }
-
-      const { migrated, changed } = migrateState(source);
+      const { state: migrated, changed } = this.parseStateContents(raw);
       if (changed) {
         await this.save(migrated);
       }
@@ -253,14 +390,14 @@ export class StateStore {
     } catch (error) {
       const asNodeError = error as NodeJS.ErrnoException;
       if (asNodeError.code === "ENOENT") {
-        return { ...DEFAULT_STATE };
-      }
-
-      if (filePath === this.filePath) {
-        const backup = await this.loadFromPath(`${this.filePath}.bak`).catch(() => null);
-        if (backup) {
-          return backup;
+        if (filePath === this.filePath && this.allowLegacyMigration) {
+          const migrated = await this.tryMigrateKnownLegacyState();
+          if (migrated) {
+            return migrated;
+          }
         }
+
+        return createDefaultState();
       }
 
       throw error;
@@ -510,10 +647,10 @@ let sharedStore: StateStore | null = null;
 let sharedStorePath: string | null = null;
 
 export function getStateStore(): StateStore {
-  const configuredPath = process.env.AUTO_DOC_STATE_FILE?.trim() || ".auto-doc/state.json";
-  if (!sharedStore || sharedStorePath !== configuredPath) {
-    sharedStore = new StateStore(configuredPath);
-    sharedStorePath = configuredPath;
+  const resolution = resolveStateStorePath();
+  if (!sharedStore || sharedStorePath !== resolution.filePath) {
+    sharedStore = new StateStore();
+    sharedStorePath = resolution.filePath;
   }
 
   return sharedStore;

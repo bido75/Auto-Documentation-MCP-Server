@@ -43,6 +43,10 @@ npm run dev
 - `AUTO_DOC_RUNNER_TARGETS` to configure multiple runner targets in one JSON payload
 - `SELF_DOC_PROJECT_ID` and `SELF_DOC_REPO_PATH` are separate runtime config values; they are not the runner source of truth
 - `STATE_ENCRYPTION_KEY` must be a unique high-entropy value in production, bridge mode, and runner mode
+- Project state defaults to `~/.auto-doc-mcp/state.json` so runner restarts resume the same project outside the current working directory
+- `AUTO_DOC_STATE_FILE` is optional and should be set only for isolated test/staging environments; explicit overrides do not auto-migrate legacy state
+- `discover_project_from_notion` can rebuild a local project binding from an existing Auto-Doc Notion project page after validating all five databases and relations
+- `AUTO_DOC_DISCOVERY_RECOVERY_ENABLED=true` plus `AUTO_DOC_DISCOVERY_PROJECT_PAGE_ID` or `AUTO_DOC_DISCOVERY_PAGE_HINTS` enables guarded runner recovery after `project_missing_from_state`; it is disabled by default
 - `AUTO_DOC_ARTIFACT_ROOT` constrains generated PDFs, local docs, help-center exports, and screenshots
 
 Generate a production state key:

@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { getOptionalRuntimeConfig, getRuntimeConfig } from "../config.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
+import { assertProviderStartupPreflight } from "../providers/factory.js";
 import { ContinuousDocumentationRunner } from "./continuous-documentation-runner.js";
 
 function parseBoolean(value: string | undefined): boolean | undefined {
@@ -190,6 +191,7 @@ export async function runContinuousDocumentationRunner(env = process.env): Promi
     message: "Starting continuous documentation runner.",
     data: { pollIntervalMs: config.pollIntervalMs, targetCount: config.targets.length },
   });
+  await assertProviderStartupPreflight(env);
   await runner.start();
   return runner;
 }

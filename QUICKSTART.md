@@ -104,6 +104,8 @@ GITHUB_WEBHOOK_SECRET=replace-with-a-random-string-if-you-use-webhooks
 
 Newer Notion internal integrations issue tokens prefixed `ntn_`; paste the exact token your integration shows.
 
+By default, Auto-Doc stores encrypted project state at `~/.auto-doc-mcp/state.json`. Leave `AUTO_DOC_STATE_FILE` unset for normal bridge and runner deployments so restarts resume the same project even when the process starts from a different working directory. Set `AUTO_DOC_STATE_FILE` only for isolated tests or intentionally separate environments; an explicit override starts from that file and does not auto-migrate legacy state.
+
 If you use a LAN Ollama server instead of the bundled Docker service, set:
 
 ```bash

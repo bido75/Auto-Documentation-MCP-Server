@@ -40,6 +40,7 @@ describe("continuous runner entrypoint", () => {
       AUTO_DOC_RUNNER_REPO_PATH: "C:/repo",
       AUTO_DOC_RUNNER_MODE: "last_commit",
       RUNNER_TICK_MS: "1000",
+      AI_PROVIDER_TYPE: "deterministic",
     } as NodeJS.ProcessEnv);
 
     expect(runnerEvents.constructedConfigs).toHaveLength(1);

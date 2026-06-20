@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { registerAssembleManualTool } from "./assemble-manual.js";
 import { registerConfigureAiProviderTool } from "./configure-ai-provider.js";
+import { registerDiscoverProjectFromNotionTool } from "./discover-project-from-notion.js";
 import { registerExportManualPdfTool } from "./export-manual-pdf.js";
 import { registerExportHelpCenterContentTool } from "./export-help-center-content.js";
 import { registerGeneratePrCommentPreviewTool } from "./generate-pr-comment-preview.js";
@@ -9,6 +10,7 @@ import { registerGenerateReleaseChangelogTool } from "./generate-release-changel
 import { registerGetRunnerFailureTriageMetadataTool } from "./get-runner-failure-triage-metadata.js";
 import { registerGetRunnerHealthSummaryTool } from "./get-runner-health-summary.js";
 import { registerGetRunnerReleaseAutomationStatusTool } from "./get-runner-release-automation-status.js";
+import { registerHealthCheckTool } from "./health-check.js";
 import { registerPublishPrCommentTool } from "./publish-pr-comment.js";
 import { registerRunAutonomousDocumentationTriggerTool } from "./run-autonomous-documentation-trigger.js";
 import { registerRunReleaseDocumentationPipelineTool } from "./run-release-documentation-pipeline.js";
@@ -18,6 +20,7 @@ import { registerSyncManualToLocalDocsTool } from "./sync-manual-to-local-docs.j
 export function registerExtraTools(server: McpServer) {
   registerAssembleManualTool(server);
   registerConfigureAiProviderTool(server);
+  registerDiscoverProjectFromNotionTool(server);
   registerExportManualPdfTool(server);
   registerExportHelpCenterContentTool(server);
   registerGeneratePrCommentPreviewTool(server);
@@ -25,6 +28,7 @@ export function registerExtraTools(server: McpServer) {
   registerGetRunnerFailureTriageMetadataTool(server);
   registerGetRunnerHealthSummaryTool(server);
   registerGetRunnerReleaseAutomationStatusTool(server);
+  registerHealthCheckTool(server);
   registerPublishPrCommentTool(server);
   registerRunAutonomousDocumentationTriggerTool(server);
   registerRunReleaseDocumentationPipelineTool(server);

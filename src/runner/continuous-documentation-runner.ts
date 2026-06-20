@@ -3,6 +3,9 @@ import { simpleGit } from "simple-git";
 import { executeAutonomousDocumentationTrigger } from "../orchestrator/auto-doc-orchestrator.js";
 import { getStateStore } from "../lib/state-store.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
+import { recordRunnerTickHealth } from "../lib/runner-health.js";
+import { createNotionClient } from "../lib/notion-client.js";
+import { selfInitializeProjectFromNotion, type NotionDiscoveryClient } from "../notion/discovery.js";
 import { registerRunReleaseDocumentationPipelineTool } from "../tools/run-release-documentation-pipeline.js";
 
 const DEFAULT_MAX_CONCURRENT_TARGETS = 4;
@@ -66,6 +69,55 @@ type ReleasePipelineInput = {
 type ReleasePipelineRunner = (input: ReleasePipelineInput) => Promise<unknown>;
 
 type LatestTagResolver = (repoPath: string) => Promise<string | null>;
+
+type DiscoveryRecoveryInput = {
+  projectId: string;
+  projectPageId: string;
+  traceId: string;
+};
+
+type DiscoveryRecoveryRunner = (input: DiscoveryRecoveryInput) => Promise<{ ok: boolean; status?: string }>;
+
+function isMissingProjectError(message: string): boolean {
+  return message.includes("Unknown projectId") || message.includes("PROJECT_STATE_MIGRATION_FAILED");
+}
+
+function discoveryRecoveryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.AUTO_DOC_DISCOVERY_RECOVERY_ENABLED?.trim().toLowerCase() === "true";
+}
+
+function discoveryPageHintFor(projectId: string, env: NodeJS.ProcessEnv = process.env): string | null {
+  const singleHint = env.AUTO_DOC_DISCOVERY_PROJECT_PAGE_ID?.trim();
+  if (singleHint) {
+    return singleHint;
+  }
+
+  const rawHints = env.AUTO_DOC_DISCOVERY_PAGE_HINTS?.trim();
+  if (!rawHints) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawHints) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    const value = (parsed as Record<string, unknown>)[projectId];
+    return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function runNotionDiscoveryRecovery(input: DiscoveryRecoveryInput): Promise<{ ok: boolean; status?: string }> {
+  const result = await selfInitializeProjectFromNotion({
+    notion: createNotionClient() as unknown as NotionDiscoveryClient,
+    store: getStateStore(),
+    projectPageId: input.projectPageId,
+    traceId: input.traceId,
+  });
+  return result.ok ? { ok: true, status: result.status } : { ok: false };
+}
 
 class InMemoryToolHost {
   public readonly handlers = new Map<
@@ -162,6 +214,7 @@ export class ContinuousDocumentationRunner extends EventEmitter {
   private readonly resolveLatestTag: LatestTagResolver;
   private readonly releasePipelineRunner: ReleasePipelineRunner;
   private readonly stateStore: ReturnType<typeof getStateStore>;
+  private readonly discoveryRecoveryRunner: DiscoveryRecoveryRunner;
   private timer: NodeJS.Timeout | null = null;
   private running = false;
   private stopped = false;
@@ -177,6 +230,7 @@ export class ContinuousDocumentationRunner extends EventEmitter {
     resolveLatestTag: LatestTagResolver = resolveLatestReleaseTag,
     releasePipelineRunner: ReleasePipelineRunner = runReleasePipeline,
     stateStore = getStateStore(),
+    discoveryRecoveryRunner: DiscoveryRecoveryRunner = runNotionDiscoveryRecovery,
   ) {
     super();
     this.config = config;
@@ -184,6 +238,7 @@ export class ContinuousDocumentationRunner extends EventEmitter {
     this.resolveLatestTag = resolveLatestTag;
     this.releasePipelineRunner = releasePipelineRunner;
     this.stateStore = stateStore;
+    this.discoveryRecoveryRunner = discoveryRecoveryRunner;
   }
 
   getSnapshot() {
@@ -333,6 +388,25 @@ export class ContinuousDocumentationRunner extends EventEmitter {
       return processed;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const recovered = await this.tryDiscoveryRecovery(target, mode, traceId, abortController.signal, message).catch((recoveryError) => {
+        const recoveryMessage = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+        logToolEvent({
+          level: "error",
+          tool: "continuous_documentation_runner",
+          stage: "discovery_recovery_failure",
+          traceId,
+          message: "Opt-in Notion discovery recovery failed.",
+          data: { projectId: target.projectId, repoPath: target.repoPath, error: recoveryMessage },
+        });
+        return null;
+      });
+      if (recovered) {
+        targetState.consecutiveFailures = 0;
+        targetState.circuitOpen = false;
+        this.emit("tick:success", { projectId: target.projectId, repoPath: target.repoPath });
+        return recovered;
+      }
+
       targetState.consecutiveFailures += 1;
       this.emit("tick:failure", {
         projectId: target.projectId,
@@ -367,6 +441,39 @@ export class ContinuousDocumentationRunner extends EventEmitter {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  private async tryDiscoveryRecovery(
+    target: ContinuousRunnerTarget,
+    mode: "staged" | "last_commit" | "working_tree",
+    traceId: string,
+    signal: AbortSignal,
+    originalError: string,
+  ): Promise<RunnerTickResult | null> {
+    if (!isMissingProjectError(originalError) || !discoveryRecoveryEnabled()) {
+      return null;
+    }
+
+    const projectPageId = discoveryPageHintFor(target.projectId);
+    if (!projectPageId) {
+      return null;
+    }
+
+    const recovery = await this.discoveryRecoveryRunner({ projectId: target.projectId, projectPageId, traceId });
+    if (!recovery.ok) {
+      return null;
+    }
+
+    logToolEvent({
+      level: "info",
+      tool: "continuous_documentation_runner",
+      stage: "discovery_recovery_success",
+      traceId,
+      message: "Recovered missing project state from Notion discovery and retrying runner target.",
+      data: { projectId: target.projectId, repoPath: target.repoPath, projectPageId, status: recovery.status },
+    });
+
+    return this.processTarget(target, mode, traceId, signal);
   }
 
   private async processTarget(
@@ -495,6 +602,7 @@ export class ContinuousDocumentationRunner extends EventEmitter {
     }
 
     this.lastResults = results;
+    await recordRunnerTickHealth({ traceId, results });
     logToolEvent({
       level: "info",
       tool: "continuous_documentation_runner",
