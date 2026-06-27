@@ -350,7 +350,7 @@ async function handlerFor(register: (server: McpServer) => void, name: string): 
 
 beforeEach(() => {
   previousAllowedRoots = process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
-  process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = "C:/repo";
+  process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = tmpdir();
   testContext.notion = null;
   testContext.store = null;
   testContext.pdfCalls = [];
@@ -543,7 +543,7 @@ describe("export and release tools", () => {
       await pipeline({
         projectId: "project_1",
         releaseVersion: "2.0.0",
-        repoPath: "C:/repo",
+        repoPath: stateDir,
         mode: "last_commit",
         audience: "both",
         packageFormat: "markdown",

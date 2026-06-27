@@ -243,8 +243,9 @@ describe("narratives-reach-authoring", () => {
     const previousToken = process.env.NOTION_TOKEN;
     const previousAllowedRoots = process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
     process.env.NOTION_TOKEN = "test_token";
-    process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = "C:/repo";
     try {
+      const repoPath = await mkdtemp(join(tmpdir(), "auto-doc-narratives-repo-"));
+      process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = repoPath;
       await seedProject("project_orchestrator");
       const server = new FakeServer();
       registerRunAutonomousDocumentationTriggerTool(server as unknown as McpServer);
@@ -253,7 +254,7 @@ describe("narratives-reach-authoring", () => {
 
       await handler!({
         projectId: "project_orchestrator",
-        repoPath: "C:/repo",
+        repoPath,
         mode: "last_commit",
         source: "local_git",
         eventType: "commit",

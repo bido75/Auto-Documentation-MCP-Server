@@ -164,7 +164,9 @@ describe("prove-real-provider-selection", () => {
           modelName: "test-model",
           runHealthCheck: false,
         });
-        expect(await readdir(process.env.AUTO_DOC_TOKEN_DIR!)).toContain("ai-local-lmstudio-api-key.dpapi");
+        const expectedTokenFile =
+          process.platform === "win32" ? "ai-local-lmstudio-api-key.dpapi" : "ai-local-lmstudio-api-key.env";
+        expect(await readdir(process.env.AUTO_DOC_TOKEN_DIR!)).toContain(expectedTokenFile);
         expect(buildCandidate()).toBeInstanceOf(LMStudioProvider);
 
         const result = JSON.parse(

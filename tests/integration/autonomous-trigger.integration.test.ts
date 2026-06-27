@@ -170,10 +170,11 @@ describe("run_autonomous_documentation_trigger", () => {
     const previousToken = process.env.NOTION_TOKEN;
     const previousAllowedRoots = process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
     process.env.NOTION_TOKEN = "test_token";
-    process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = "C:/repo";
 
     try {
       const stateDir = await mkdtemp(join(tmpdir(), "auto-doc-autonomous-"));
+      const repoPath = await mkdtemp(join(tmpdir(), "auto-doc-autonomous-repo-"));
+      process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = repoPath;
       testContext.store = new StateStore(join(stateDir, "state.json"));
       testContext.notion = createFakeNotion();
 
@@ -203,7 +204,7 @@ describe("run_autonomous_documentation_trigger", () => {
 
       const input = {
         projectId: "project_1",
-        repoPath: "C:/repo",
+        repoPath,
         mode: "last_commit",
         source: "local_git",
         eventType: "commit",
