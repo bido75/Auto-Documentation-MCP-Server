@@ -6,6 +6,13 @@ const DEFAULT_PROVIDER = "openai";
 const DEFAULT_TEMPERATURE = 0.1;
 const DEFAULT_MAX_TOKENS = 2048;
 
+class PromptRepoUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "PromptRepoUnavailableError";
+  }
+}
+
 const PROMPTS = [
   {
     name: "auto-doc-analyzer",
@@ -158,12 +165,33 @@ function isLatestEquivalent(latest, desired) {
 }
 
 async function fetchJson(url, options = {}) {
-  const response = await fetch(url, options);
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new PromptRepoUnavailableError(`Prompt repo unavailable for ${url}: ${message}`);
+  }
+
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`${response.status} ${response.statusText} for ${url}\n${body}`.trim());
+    const preview = body.trim().slice(0, 300);
+    throw new PromptRepoUnavailableError(`${response.status} ${response.statusText} for ${url}${preview ? `\n${preview}` : ""}`.trim());
   }
-  return response.json();
+
+  const contentType = response.headers.get("content-type") || "";
+  const body = await response.text();
+  if (!contentType.toLowerCase().includes("application/json")) {
+    const preview = body.trim().slice(0, 120);
+    throw new PromptRepoUnavailableError(`Prompt repo returned a non-JSON response from ${url} (${contentType || "no content-type"}).${preview ? ` Preview: ${preview}` : ""}`);
+  }
+
+  try {
+    return JSON.parse(body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new PromptRepoUnavailableError(`Prompt repo returned invalid JSON from ${url}: ${message}`);
+  }
 }
 
 async function postJson(url, payload, headers) {
@@ -185,7 +213,17 @@ async function postJson(url, payload, headers) {
 }
 
 async function main() {
-  const endpoint = normalizeEndpoint(getArgValue("--endpoint") || process.env.BIFROST_ENDPOINT || DEFAULT_ENDPOINT);
+  const endpointArg = getArgValue("--endpoint");
+  const endpointEnv = process.env.BIFROST_ENDPOINT || process.env.BIFROST_PROMPT_REPO_ENDPOINT || "";
+  const endpointConfigured = Boolean(endpointArg?.trim() || endpointEnv.trim());
+  const dryRun = hasFlag("--dry-run");
+  const required = hasFlag("--required") || process.env.BIFROST_PROMPT_DRIFT_REQUIRED === "true";
+  if (dryRun && !required && !endpointConfigured) {
+    console.error("Prompt drift guard skipped: prompt repo endpoint is not configured.");
+    return;
+  }
+
+  const endpoint = normalizeEndpoint(endpointArg || endpointEnv || DEFAULT_ENDPOINT);
   const apiKey = getArgValue("--api-key") || process.env.AI_API_KEY || "";
   const basicAuthUsername = getArgValue("--basic-auth-username") || process.env.BIFROST_BASIC_AUTH_USERNAME || "";
   const basicAuthPassword = getArgValue("--basic-auth-password") || process.env.BIFROST_BASIC_AUTH_PASSWORD || "";
@@ -193,7 +231,6 @@ async function main() {
   const provider = getArgValue("--provider") || DEFAULT_PROVIDER;
   const temperature = Number(getArgValue("--temperature") || DEFAULT_TEMPERATURE);
   const maxTokens = Number(getArgValue("--max-tokens") || DEFAULT_MAX_TOKENS);
-  const dryRun = hasFlag("--dry-run");
 
   const headers = {};
   if (basicAuthUsername.trim().length > 0 && basicAuthPassword.trim().length > 0) {
@@ -203,7 +240,16 @@ async function main() {
     headers.Authorization = `Bearer ${apiKey.trim()}`;
   }
 
-  const promptsPayload = await fetchJson(`${endpoint}/api/prompt-repo/prompts`, { headers });
+  let promptsPayload;
+  try {
+    promptsPayload = await fetchJson(`${endpoint}/api/prompt-repo/prompts`, { headers });
+  } catch (error) {
+    if (dryRun && !required && error instanceof PromptRepoUnavailableError) {
+      console.error(`Prompt drift guard skipped: ${error.message}`);
+      return;
+    }
+    throw error;
+  }
   const prompts = Array.isArray(promptsPayload?.prompts) ? promptsPayload.prompts : [];
 
   let unchanged = 0;
@@ -218,7 +264,16 @@ async function main() {
       continue;
     }
 
-    const versionsPayload = await fetchJson(`${endpoint}/api/prompt-repo/prompts/${match.id}/versions`, { headers });
+    let versionsPayload;
+    try {
+      versionsPayload = await fetchJson(`${endpoint}/api/prompt-repo/prompts/${match.id}/versions`, { headers });
+    } catch (error) {
+      if (dryRun && !required && error instanceof PromptRepoUnavailableError) {
+        console.error(`Prompt drift guard skipped: ${error.message}`);
+        return;
+      }
+      throw error;
+    }
     const versions = Array.isArray(versionsPayload?.versions) ? versionsPayload.versions : [];
     const latest = versions.find((item) => item?.is_latest) ?? versions[0] ?? null;
 
