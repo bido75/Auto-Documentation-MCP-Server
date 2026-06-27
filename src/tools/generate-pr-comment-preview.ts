@@ -1,4 +1,4 @@
-// @ts-nocheck
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { createNotionClient } from "../lib/notion-client.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
@@ -6,27 +6,66 @@ import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import { getStateStore } from "../lib/state-store.js";
-function getTitleValue(properties, key) {
+
+type AudienceFilter = "user" | "admin" | "both";
+type PropertyMap = Record<string, unknown>;
+type NotionPage = { id: string; properties?: PropertyMap };
+type QueryInput = { database_id: string; filter?: unknown; page_size?: number; start_cursor?: string };
+type QueryResponse = { results: NotionPage[]; has_more?: boolean; next_cursor?: string | null };
+type NotionClientLike = { databases: { query(input: QueryInput): Promise<QueryResponse> } };
+type PreviewEntry = {
+    pageId: string;
+    title: string;
+    entryType: string;
+    audience: string;
+    status: string;
+    confidenceScore: number | null;
+    sourcePr: string | null;
+};
+type PreviewStatusCounts = Record<string, number>;
+type RenderPreviewInput = {
+    projectName: string;
+    projectId: string;
+    prUrl: string | null;
+    entryCount: number;
+    statusCounts: PreviewStatusCounts;
+    entries: PreviewEntry[];
+};
+type GeneratePrCommentPreviewInput = {
+    projectId: string;
+    prUrl?: string;
+    audience?: AudienceFilter;
+    maxEntries?: number;
+    traceId?: string;
+};
+
+function getTitleValue(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.title?.[0]?.text?.content ?? null;
+    return typeof value === "object" && value !== null
+        ? ((value as { title?: Array<{ text?: { content?: string } }> }).title?.[0]?.text?.content ?? null)
+        : null;
 }
-function getSelectName(properties, key) {
+function getSelectName(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.select?.name ?? null;
+    return typeof value === "object" && value !== null ? ((value as { select?: { name?: string } }).select?.name ?? null) : null;
 }
-function getStatusName(properties, key) {
+function getStatusName(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.status?.name ?? null;
+    return typeof value === "object" && value !== null ? ((value as { status?: { name?: string } }).status?.name ?? null) : null;
 }
-function getNumberValue(properties, key) {
+function getNumberValue(properties: PropertyMap, key: string): number | null {
     const value = properties[key];
-    return typeof value?.number === "number" ? value.number : null;
+    return typeof value === "object" && value !== null && typeof (value as { number?: unknown }).number === "number"
+        ? (value as { number: number }).number
+        : null;
 }
-function getUrlValue(properties, key) {
+function getUrlValue(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return typeof value?.url === "string" ? value.url : null;
+    return typeof value === "object" && value !== null && typeof (value as { url?: unknown }).url === "string"
+        ? (value as { url: string }).url
+        : null;
 }
-function matchesAudience(audience, filter) {
+function matchesAudience(audience: string, filter: AudienceFilter = "both"): boolean {
     if (filter === "both") {
         return true;
     }
@@ -35,7 +74,7 @@ function matchesAudience(audience, filter) {
     }
     return audience === "Admin" || audience === "Both";
 }
-function statusRank(status) {
+function statusRank(status: string): number {
     if (status === "Published") {
         return 0;
     }
@@ -50,24 +89,24 @@ function statusRank(status) {
     }
     return 9;
 }
-async function queryAll(notion, input) {
-    const results = [];
-    let cursor;
+async function queryAll(notion: NotionClientLike, input: QueryInput): Promise<NotionPage[]> {
+    const results: NotionPage[] = [];
+    let cursor: string | undefined;
     do {
-        const payload = {
+        const payload: QueryInput = {
             ...input,
             ...(cursor ? { start_cursor: cursor } : {}),
         };
-        const response = (await withNotionRetry(() => notion.databases.query(payload), {
+        const response = await withNotionRetry(() => notion.databases.query(payload), {
             operationName: "databases.query",
             payload,
-        }));
+        });
         results.push(...response.results);
         cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
     } while (cursor);
     return results;
 }
-function renderPreviewMarkdown(input) {
+function renderPreviewMarkdown(input: RenderPreviewInput): string {
     const summaryLine = [
         `Published: ${input.statusCounts.Published ?? 0}`,
         `Approved: ${input.statusCounts.Approved ?? 0}`,
@@ -98,14 +137,14 @@ function renderPreviewMarkdown(input) {
         }),
     ].join("\n");
 }
-export function registerGeneratePrCommentPreviewTool(server) {
+export function registerGeneratePrCommentPreviewTool(server: McpServer): void {
     server.tool("generate_pr_comment_preview", "Builds a markdown preview payload suitable for a GitHub PR comment.", {
         projectId: z.string(),
         prUrl: z.string().url().optional(),
         audience: z.enum(["user", "admin", "both"]).default("both"),
         maxEntries: z.number().int().min(1).max(50).default(8),
         traceId: z.string().optional(),
-    }, async (input) => {
+    }, async (input: GeneratePrCommentPreviewInput) => {
         const traceId = resolveTraceId(input.traceId);
         const startedAt = Date.now();
         logToolEvent({
@@ -122,8 +161,9 @@ export function registerGeneratePrCommentPreviewTool(server) {
             if (!project) {
                 throw new Error("Unknown projectId. Run initialize_project_manual first.");
             }
-            const notion = createNotionClient();
-            await runProjectPreflight({ notion, project });
+            const rawNotion = createNotionClient();
+            await runProjectPreflight({ notion: rawNotion, project });
+            const notion = rawNotion as unknown as NotionClientLike;
             const records = await queryAll(notion, {
                 database_id: project.databases.manualEntriesDatabaseId,
                 filter: {
@@ -159,7 +199,7 @@ export function registerGeneratePrCommentPreviewTool(server) {
                 return a.title.localeCompare(b.title);
             });
             const selectedEntries = previewEntries.slice(0, input.maxEntries);
-            const statusCounts = selectedEntries.reduce((acc, entry) => {
+            const statusCounts = selectedEntries.reduce<PreviewStatusCounts>((acc, entry) => {
                 acc[entry.status] = (acc[entry.status] ?? 0) + 1;
                 return acc;
             }, {});

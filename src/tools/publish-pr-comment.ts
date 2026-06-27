@@ -1,22 +1,38 @@
-// @ts-nocheck
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { registerGeneratePrCommentPreviewTool } from "./generate-pr-comment-preview.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
-import { throwAsMcpToolError } from "../lib/mcp-error.js";
+import { McpToolError, throwAsMcpToolError } from "../lib/mcp-error.js";
+
+type ToolResult = { content: Array<{ type: string; text: string }> };
+type ToolHandler = (input: unknown) => Promise<ToolResult>;
+type PullRequestTarget = { owner: string; repo: string; issueNumber: number };
+type GitHubComment = { id: number; body: string; html_url?: string };
+type GitHubRequestInput = { url: string; method: "GET" | "POST" | "PATCH"; token: string; body?: Record<string, unknown> };
+type PublishPrCommentInput = {
+    projectId: string;
+    prUrl: string;
+    audience?: "user" | "admin" | "both";
+    maxEntries?: number;
+    dryRun?: boolean;
+    traceId?: string;
+};
+type PreviewResponse = { markdownPreview: string; entryCount: number };
+
 class InMemoryToolHost {
-    handlers = new Map();
-    tool(name, _description, _schema, handler) {
+    handlers = new Map<string, ToolHandler>();
+    tool(name: string, _description: string, _schema: unknown, handler: ToolHandler): void {
         this.handlers.set(name, handler);
     }
 }
-function parseToolText(result) {
+function parseToolText<T>(result: ToolResult): T {
     const first = result.content[0];
     if (!first || first.type !== "text") {
         throw new Error("Tool did not return a text payload.");
     }
-    return JSON.parse(first.text);
+    return JSON.parse(first.text) as T;
 }
-function parsePullRequestUrl(prUrl) {
+function parsePullRequestUrl(prUrl: string): PullRequestTarget {
     const match = prUrl.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:$|[?#/])/i);
     if (!match) {
         throw new Error("Invalid GitHub pull request URL. Expected format: https://github.com/<owner>/<repo>/pull/<number>");
@@ -27,24 +43,24 @@ function parsePullRequestUrl(prUrl) {
         issueNumber: Number(match[3]),
     };
 }
-function getGitHubToken() {
+function getGitHubToken(): string {
     const token = process.env.GITHUB_TOKEN?.trim();
     if (!token) {
         throw new Error("GITHUB_TOKEN environment variable is required to publish PR comments.");
     }
     return token;
 }
-function getGitHubApiBaseUrl() {
+function getGitHubApiBaseUrl(): string {
     const base = process.env.GITHUB_API_BASE_URL?.trim();
     return base && base.length > 0 ? base.replace(/\/$/, "") : "https://api.github.com";
 }
-function createMarker(projectId) {
+function createMarker(projectId: string): string {
     return `<!-- auto-doc-pr-comment project=${projectId} -->`;
 }
-function renderCommentBody(marker, markdownPreview) {
+function renderCommentBody(marker: string, markdownPreview: string): string {
     return `${marker}\n${markdownPreview}`;
 }
-async function githubRequest(input) {
+async function githubRequest<T>(input: GitHubRequestInput): Promise<T> {
     const response = await fetch(input.url, {
         method: input.method,
         headers: {
@@ -59,9 +75,9 @@ async function githubRequest(input) {
         const details = await response.text();
         throw new Error(`GitHub API request failed (${response.status} ${response.statusText}): ${details}`);
     }
-    return (await response.json());
+    return (await response.json()) as T;
 }
-async function listIssueComments(input) {
+async function listIssueComments(input: { baseUrl: string; owner: string; repo: string; issueNumber: number; token: string }): Promise<GitHubComment[]> {
     const url = `${input.baseUrl}/repos/${input.owner}/${input.repo}/issues/${input.issueNumber}/comments?per_page=100`;
     return githubRequest({
         url,
@@ -69,7 +85,7 @@ async function listIssueComments(input) {
         token: input.token,
     });
 }
-async function createIssueComment(input) {
+async function createIssueComment(input: { baseUrl: string; owner: string; repo: string; issueNumber: number; token: string; body: string }): Promise<GitHubComment> {
     const url = `${input.baseUrl}/repos/${input.owner}/${input.repo}/issues/${input.issueNumber}/comments`;
     return githubRequest({
         url,
@@ -78,7 +94,7 @@ async function createIssueComment(input) {
         body: { body: input.body },
     });
 }
-async function updateIssueComment(input) {
+async function updateIssueComment(input: { baseUrl: string; owner: string; repo: string; commentId: number; token: string; body: string }): Promise<GitHubComment> {
     const resolvedUrl = `${input.baseUrl}/repos/${input.owner}/${input.repo}/issues/comments/${input.commentId}`;
     return githubRequest({
         url: resolvedUrl,
@@ -87,7 +103,7 @@ async function updateIssueComment(input) {
         body: { body: input.body },
     });
 }
-export function registerPublishPrCommentTool(server) {
+export function registerPublishPrCommentTool(server: McpServer): void {
     server.tool("publish_pr_comment", "Publishes or updates an auto-documentation preview comment on a GitHub pull request.", {
         projectId: z.string(),
         prUrl: z.string().url(),
@@ -95,7 +111,7 @@ export function registerPublishPrCommentTool(server) {
         maxEntries: z.number().int().min(1).max(50).default(8),
         dryRun: z.boolean().default(false),
         traceId: z.string().optional(),
-    }, async ({ projectId, prUrl, audience, maxEntries, dryRun, traceId: incomingTraceId }) => {
+    }, async ({ projectId, prUrl, audience, maxEntries, dryRun, traceId: incomingTraceId }: PublishPrCommentInput) => {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         const resolvedAudience = audience ?? "both";
@@ -111,12 +127,12 @@ export function registerPublishPrCommentTool(server) {
         });
         try {
             const host = new InMemoryToolHost();
-            registerGeneratePrCommentPreviewTool(host);
+            registerGeneratePrCommentPreviewTool(host as unknown as McpServer);
             const previewHandler = host.handlers.get("generate_pr_comment_preview");
             if (!previewHandler) {
                 throw new Error("Preview tool handler unavailable.");
             }
-            const preview = parseToolText(await previewHandler({
+            const preview = parseToolText<PreviewResponse>(await previewHandler({
                 projectId,
                 prUrl,
                 audience: resolvedAudience,
@@ -204,6 +220,7 @@ export function registerPublishPrCommentTool(server) {
             };
         }
         catch (error) {
+            const reportedError = error instanceof McpToolError ? new Error(error.envelope.error.message) : error;
             logToolEvent({
                 level: "error",
                 tool: "publish_pr_comment",
@@ -215,7 +232,7 @@ export function registerPublishPrCommentTool(server) {
             throwAsMcpToolError({
                 tool: "publish_pr_comment",
                 traceId,
-                error,
+                error: reportedError,
                 defaultCode: "PUBLISH_PR_COMMENT_FAILED",
             });
         }

@@ -1,6 +1,14 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { getOptionalRuntimeConfig } from "../config.js";
-import { buildSharedPromptContent, type ModelAnalysis, type ModelProvider, type StructuredEvidence } from "./base.js";
+import {
+  buildManualAuthoringPrompt,
+  buildSharedPromptContent,
+  type ManualAuthoringProviderInput,
+  type ManualAuthoringProviderResult,
+  type ModelAnalysis,
+  type ModelProvider,
+  type StructuredEvidence,
+} from "./base.js";
 
 export class AnthropicProvider implements ModelProvider {
   readonly id = "cloud-anthropic";
@@ -44,5 +52,24 @@ export class AnthropicProvider implements ModelProvider {
     const text = first && first.type === "text" ? first.text : "{}";
     const parsed = JSON.parse(text.replace(/```json|```/g, "").trim()) as ModelAnalysis;
     return { ...parsed, providerUsed: this.id, generationMs: Date.now() - startedAt };
+  }
+
+  async authorManualSection(input: ManualAuthoringProviderInput): Promise<ManualAuthoringProviderResult> {
+    const runtime = getOptionalRuntimeConfig();
+    const startedAt = Date.now();
+    const response = await this.client.messages.create({
+      model: runtime.provider.modelName,
+      max_tokens: 4096,
+      system: "You are a senior technical manual writer. Produce concrete, novice-readable markdown inside valid JSON only.",
+      messages: [{ role: "user", content: buildManualAuthoringPrompt(input) }],
+    });
+    const first = response.content[0];
+    const text = first && first.type === "text" ? first.text : "{}";
+    const parsed = JSON.parse(text.replace(/```json|```/g, "").trim()) as { body?: unknown };
+    const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
+    if (!body) {
+      throw new Error(`Provider ${this.id} returned an empty manual body.`);
+    }
+    return { body, providerUsed: this.id, generationMs: Date.now() - startedAt };
   }
 }

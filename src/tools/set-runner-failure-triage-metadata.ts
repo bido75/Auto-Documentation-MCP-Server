@@ -1,9 +1,22 @@
-// @ts-nocheck
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { getStateStore } from "../lib/state-store.js";
-export function registerSetRunnerFailureTriageMetadataTool(server) {
+
+type SetRunnerFailureTriageMetadataInput = {
+    projectId: string;
+    repoPath: string;
+    action?: "set" | "clear";
+    acknowledge?: boolean;
+    acknowledgedAt?: string;
+    acknowledgedBy?: string;
+    note?: string;
+    cooldownUntil?: string;
+    traceId?: string;
+};
+
+export function registerSetRunnerFailureTriageMetadataTool(server: McpServer): void {
     server.tool("set_runner_failure_triage_metadata", "Sets or clears persisted runner failure triage metadata for a project and repository target.", {
         projectId: z.string().min(1),
         repoPath: z.string().min(1),
@@ -14,7 +27,7 @@ export function registerSetRunnerFailureTriageMetadataTool(server) {
         note: z.string().min(1).optional(),
         cooldownUntil: z.string().datetime().optional(),
         traceId: z.string().optional(),
-    }, async ({ projectId, repoPath, action, acknowledge, acknowledgedAt, acknowledgedBy, note, cooldownUntil, traceId: incomingTraceId, }) => {
+    }, async ({ projectId, repoPath, action = "set", acknowledge = false, acknowledgedAt, acknowledgedBy, note, cooldownUntil, traceId: incomingTraceId, }: SetRunnerFailureTriageMetadataInput) => {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         logToolEvent({

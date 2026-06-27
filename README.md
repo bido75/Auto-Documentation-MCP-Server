@@ -2,7 +2,15 @@
 
 Production-ready TypeScript MCP server that captures development signals and continuously builds user/admin documentation in Notion.
 
+The local bridge uses HTTP-SSE transport:
+
+- `GET /sse` opens the MCP session stream
+- `POST /messages?sessionId=...` sends JSON-RPC tool calls for that session
+- `GET /health`, `GET /info`, `GET /startup/preflight`, and `GET /contracts/bifrost-discovery` expose runtime and contract checks
+
 ## Quick Start
+
+For a full cold-start path from clone to a first generated manual, use [QUICKSTART.md](QUICKSTART.md).
 
 1. Install dependencies:
 
@@ -13,6 +21,7 @@ npm ci
 2. Run checks:
 
 ```bash
+npm run lint
 npm run typecheck
 npm test
 npm run build
@@ -29,98 +38,58 @@ npm run dev
 - `NOTION_TOKEN` for Notion API access
 - `NOTION_PARENT_PAGE_ID` for live integration tests
 - `RUN_LIVE_NOTION_TESTS=true` to enable env-gated live tests
+- `BIFROST_VIRTUAL_KEY` for Bifrost-backed AI calls when the provider is `bifrost`
+- `AUTO_DOC_BRIDGE_API_KEY` for HTTP-SSE bridge access; required to open `/sse`, `/runner/status`, and `/runner/trigger`
+- `AUTO_DOC_RUNNER_PROJECT_ID` and `AUTO_DOC_RUNNER_REPO_PATH` to enable the continuous runner
+- `AUTO_DOC_RUNNER_TARGETS` to configure multiple runner targets in one JSON payload
+- `SELF_DOC_PROJECT_ID` and `SELF_DOC_REPO_PATH` are separate runtime config values; they are not the runner source of truth
+- `STATE_ENCRYPTION_KEY` must be a unique high-entropy value in production, bridge mode, and runner mode
+- Project state defaults to `~/.auto-doc-mcp/state.json` so runner restarts resume the same project outside the current working directory
+- `AUTO_DOC_STATE_FILE` is optional and should be set only for isolated test/staging environments; explicit overrides do not auto-migrate legacy state
+- `discover_project_from_notion` can rebuild a local project binding from an existing Auto-Doc Notion project page after validating all five databases and relations
+- `AUTO_DOC_DISCOVERY_RECOVERY_ENABLED=true` plus `AUTO_DOC_DISCOVERY_PROJECT_PAGE_ID` or `AUTO_DOC_DISCOVERY_PAGE_HINTS` enables guarded runner recovery after `project_missing_from_state`; it is disabled by default
+- `AUTO_DOC_ARTIFACT_ROOT` constrains generated PDFs, local docs, help-center exports, and screenshots
 
-## Prompt Repository Sync
-
-Use the committed utility to keep Bifrost prompt-repo entries aligned with runtime defaults for:
-
-- `auto-doc-analyzer`
-- `auto-doc-reviewer`
-- `auto-doc-gap-filler`
-- `auto-doc-staleness-updater`
-
-The script is idempotent: it only creates a new prompt version when content or model metadata changed.
-
-Dry-run preview:
-
-```bash
-npm run prompts:sync:dry-run
-```
-
-Apply updates:
+Generate a production state key:
 
 ```bash
-npm run prompts:sync
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 ```
 
-Optional overrides:
+## Runtime Modes
 
-```bash
-node scripts/sync-prompt-repo.mjs --endpoint http://localhost:8080 --model llama3.2:3b-instruct-q4_K_M --temperature 0.1 --max-tokens 2048
+Container default: HTTP bridge mode. The Docker image starts `node build/src/cli/index.js bridge`, exposes `/health`, and is intended for web, Bifrost, and tunnel deployments. Set `AUTO_DOC_BRIDGE_API_KEY` before opening MCP or runner sessions; non-loopback binds fail closed without a configured, non-placeholder key.
+
+Use stdio MCP locally with `npm run dev` or `node build/src/index.js`. Use continuous mode with `AUTO_DOC_RUNTIME_MODE=runner node build/src/index.js` or `node build/src/cli/index.js runner` after configuring runner targets.
+
+## VS Code MCP Development Integration
+
+This repository includes local MCP workspace configuration in:
+
+- `.mcp.json`
+- `.vscode/mcp.json`
+
+The default connection runs this server directly over stdio:
+
+```json
+{
+  "command": "node",
+  "args": ["build/src/index.js"]
+}
 ```
 
-Auth: if your prompt-repo endpoint requires auth, export `AI_API_KEY` or pass `--api-key` for Bearer mode.
-For HTTP Basic Auth, export `BIFROST_BASIC_AUTH_USERNAME` and `BIFROST_BASIC_AUTH_PASSWORD` (or pass `--basic-auth-username` / `--basic-auth-password`).
+Before running your MCP client in development:
 
-### CI Drift Guard
+1. Run `npm ci`.
+2. Run `npm run build`.
+3. Ensure your `.env` contains `NOTION_TOKEN`, `NOTION_PARENT_PAGE_ID`, and `STATE_ENCRYPTION_KEY`.
+4. Restart your MCP client/IDE so the server entry is reloaded.
 
-CI runs `npm run prompts:sync:dry-run` as a required guard in `.github/workflows/ci.yml`.
-
-Set these repository secrets so CI can query your prompt repository:
-
-- `BIFROST_PROMPT_REPO_ENDPOINT` (example: `https://bifrost.your-domain.com`)
-- `BIFROST_PROMPT_REPO_API_KEY` (optional if endpoint is public)
-- `BIFROST_BASIC_AUTH_USERNAME` (optional, for nginx/basic-auth protected endpoints)
-- `BIFROST_BASIC_AUTH_PASSWORD` (optional, for nginx/basic-auth protected endpoints)
-
-Self-hosted note:
-
-- There is no separate "prompt repo API key" in many self-hosted Bifrost setups.
-- Use the same gateway API key your runtime uses for `AI_API_KEY` (commonly `ollama` in this project), or leave it unset if your endpoint does not require auth.
-- If your public Bifrost URL is protected by HTTP Basic Auth, set `BIFROST_BASIC_AUTH_USERNAME` and `BIFROST_BASIC_AUTH_PASSWORD` instead of embedding credentials directly in `BIFROST_PROMPT_REPO_ENDPOINT`.
-- CI accepts either Actions Variables or Actions Secrets for `BIFROST_PROMPT_REPO_ENDPOINT` and `BIFROST_PROMPT_REPO_API_KEY`.
-- If `BIFROST_PROMPT_REPO_API_KEY` is not provided, CI falls back to `ollama`.
-
-Important: GitHub Actions reads from repository Settings -> Secrets and variables -> Actions, not Codespaces secrets.
-
-If drift is detected, CI fails and prints which prompt would require a new version.
-
-### One-Click Connectivity Check
-
-Use manual workflow `.github/workflows/prompt-endpoint-connectivity.yml` to validate Actions networking and auth to your configured prompt endpoint.
-
-- Trigger from GitHub Actions: `Prompt Endpoint Connectivity Check`.
-- Required workflow input: `endpoint` (example: `https://bifrost.giscop.com`).
-- Prints safe diagnostics only (HTTP code, connect/total time, remote IP, response size).
-- If endpoint is missing or unreachable from GitHub-hosted runners, the workflow fails with explicit guidance.
-
-## Cloud Failover Smoke Test
-
-Use the one-command smoke test to force local model failure and verify OpenRouter fallback is actually used.
-
-1. Export your OpenRouter key:
-
-```bash
-export OPENROUTER_API_KEY=<your-openrouter-key>
-```
-
-2. Run:
-
-```bash
-npm run failover:smoke
-```
-
-Optional overrides:
-
-```bash
-node scripts/forced-cloud-failover-smoke.mjs --cloud-model openai/gpt-4o-mini --endpoint http://localhost:8080/v1 --bifrost-endpoint http://localhost:8080
-```
-
-Success criteria: output contains `providerUsed` starting with `openrouter:` and exits with code `0`.
+HTTP-SSE bridge mode remains available for web or remote clients. See [QUICKSTART.md](QUICKSTART.md) for bridge setup, Notion setup, provider configuration, and first tool calls.
 
 ## CI
 
-GitHub Actions runs typecheck, tests, and build on pushes and pull requests to `main`.
+GitHub Actions runs typecheck, lint, tests, build, and a Docker bridge smoke test on pushes and pull requests to `main`.
 
 ## Branch Protection
 

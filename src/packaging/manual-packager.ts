@@ -1,10 +1,21 @@
-import type { Audience, DocumentationStatus } from "../types.js";
+import type { Audience, DocumentationStatus, ManualFigure } from "../types.js";
 
 interface ManualEntry {
   title: string;
   body: string;
   audience: Audience;
   status: DocumentationStatus;
+  figures?: ManualFigure[];
+}
+
+function figureMarkdown(figure: ManualFigure): string | null {
+  const target = figure.url ?? figure.artifactPath;
+  if (!target) {
+    return null;
+  }
+
+  const altText = (figure.altText ?? figure.caption).replaceAll("]", "\\]");
+  return [`![${altText}](${target})`, figure.caption.trim().length > 0 ? `_${figure.caption}_` : ""].filter(Boolean).join("\n");
 }
 
 export function buildMarkdownManual(input: {
@@ -31,6 +42,12 @@ export function buildMarkdownManual(input: {
   return [
     `# ${input.projectName} ${input.audience} Manual - ${input.releaseVersion}`,
     "",
-    ...included.flatMap((entry) => [`## ${entry.title}`, "", entry.body, ""]),
+    ...included.flatMap((entry) => [
+      `## ${entry.title}`,
+      "",
+      entry.body,
+      ...((entry.figures ?? []).map(figureMarkdown).filter((value): value is string => value !== null).flatMap((value) => ["", value])),
+      "",
+    ]),
   ].join("\n");
 }

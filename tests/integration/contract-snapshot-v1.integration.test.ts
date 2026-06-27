@@ -39,6 +39,34 @@ vi.mock("../../src/lib/state-store.js", async () => {
   };
 });
 
+vi.mock("../../src/providers/factory.js", () => ({
+  analyzeWithFallback: vi.fn(async () => ({
+    featureName: "Billing Settings",
+    featureKey: "route:billing-settings",
+    shouldDocument: true,
+    audiences: ["User", "Admin"],
+    userGuide: {
+      summary: "Users can export invoices from billing settings.",
+      steps: ["Open Billing settings", "Select Export invoices"],
+      expectedOutcome: "Invoice export is available.",
+      possibleErrors: [],
+    },
+    adminGuide: {
+      configRequired: ["No extra configuration required"],
+      endpointsAffected: [],
+      envVarsRequired: [],
+      verificationSteps: ["Verify invoice export succeeds"],
+      troubleshooting: [],
+    },
+    confidenceScore: 90,
+    confidenceReasons: ["Provider contract mock generated documentation."],
+    reviewQuestions: [],
+    providerUsed: "contract-test-provider",
+    generationMs: 1,
+  })),
+  embedText: vi.fn(async () => [1, 0, 0]),
+}));
+
 type FakePage = {
   id: string;
   parent: { database_id: string };

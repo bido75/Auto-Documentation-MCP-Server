@@ -8,6 +8,14 @@ import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { getStateStore } from "../lib/state-store.js";
 import { createManualEntry } from "../notion/manual-entry.js";
 
+const manualFigureSchema = z.object({
+  url: z.string().url().optional(),
+  artifactPath: z.string().optional(),
+  caption: z.string(),
+  altText: z.string().optional(),
+  visualId: z.string().optional(),
+});
+
 function normalizePublishingMode(mode: "conservative" | "balanced" | "fully_automatic") {
   if (mode === "conservative") {
     return "Conservative" as const;
@@ -40,6 +48,7 @@ export function registerUpsertFeatureDocumentationTool(server: McpServer) {
           developerNotes: z.string().optional(),
           routes: z.array(z.string()).optional(),
           apiEndpoints: z.array(z.string()).optional(),
+          figures: z.array(manualFigureSchema).optional(),
         }),
       ),
       evidenceEventIds: z.array(z.string()),
@@ -177,6 +186,35 @@ export function registerUpsertFeatureDocumentationTool(server: McpServer) {
                 ? entry.adminGuide
                 : entry.developerNotes ?? entry.userGuide;
 
+          const existingManualEntryPayload = {
+            database_id: manualEntriesDatabaseId,
+            filter: {
+              and: [
+                {
+                  property: "Entry Title",
+                  title: { equals: entry.title },
+                },
+                {
+                  property: "Feature",
+                  relation: { contains: featurePageId },
+                },
+              ],
+            },
+            page_size: 1,
+          };
+          const existingManualEntry = await withNotionRetry(() => notion.databases.query(existingManualEntryPayload), {
+            operationName: "databases.query",
+            payload: existingManualEntryPayload,
+          });
+          const existingPage = existingManualEntry.results[0];
+          if (existingPage) {
+            pages.push({
+              pageId: existingPage.id,
+              url: "url" in existingPage && typeof existingPage.url === "string" ? existingPage.url : undefined,
+            });
+            continue;
+          }
+
           pages.push(
             await createManualEntry({
               notion,
@@ -188,6 +226,7 @@ export function registerUpsertFeatureDocumentationTool(server: McpServer) {
                 body,
                 routes: entry.routes,
                 apiEndpoints: entry.apiEndpoints,
+                figures: entry.figures,
               },
               status: publish.status,
               decision: publish.decision,

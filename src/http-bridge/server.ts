@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import cors from "cors";
-import express, { type Request, type Response } from "express";
-import { getOptionalRuntimeConfig } from "../config.js";
+import express, { type Express, type Request, type Response } from "express";
+import { assertProductionSecretConfig, getOptionalRuntimeConfig } from "../config.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { validateBifrostRouteConfig } from "../lib/bifrost-route-validation.js";
@@ -15,11 +15,13 @@ import { registerUpsertFeatureDocumentationTool } from "../tools/upsert-feature-
 import { createServer, REGISTERED_TOOL_NAMES, SERVER_METADATA } from "../server.js";
 import { executeAutonomousDocumentationTrigger, type AutonomousTriggerInput } from "../orchestrator/auto-doc-orchestrator.js";
 import { parseContinuousRunnerTargets } from "../runner/index.js";
-import { buildCandidate } from "../providers/factory.js";
+import { buildCandidate, preflightProviderTiers, type ProviderTierPreflightResult } from "../providers/factory.js";
 
 const DEFAULT_PORT = 3741;
 const DEFAULT_WEBHOOK_RATE_LIMIT_PER_MINUTE = 60;
 const DEFAULT_REPLAY_TTL_MS = 10 * 60 * 1000;
+
+type HttpBridgeOptions = { port?: number; host?: string };
 
 function isTruthyEnv(value: string | undefined): boolean {
   if (!value) {
@@ -28,6 +30,129 @@ function isTruthyEnv(value: string | undefined): boolean {
 
   const normalized = value.trim().toLowerCase();
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function resolveHttpBridgeListenOptions(options?: HttpBridgeOptions): { port: number; host: string } {
+  const envPortRaw = process.env.AUTO_DOC_HTTP_PORT?.trim();
+  const envPort = envPortRaw ? Number.parseInt(envPortRaw, 10) : NaN;
+  const port = options?.port ?? (Number.isInteger(envPort) && envPort > 0 ? envPort : DEFAULT_PORT);
+  const host = options?.host ?? (process.env.AUTO_DOC_HTTP_HOST?.trim() || "127.0.0.1");
+  return { port, host };
+}
+
+function isLoopbackBindHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
+}
+
+function bridgeKeyDigest(value: string): Buffer {
+  return createHmac("sha256", "auto-doc-bridge-api-key").update(value).digest();
+}
+
+function bridgeKeyMatches(provided: string, expected: string): boolean {
+  return timingSafeEqual(bridgeKeyDigest(provided), bridgeKeyDigest(expected));
+}
+
+function isUnsafeBridgeKey(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return new Set([
+    "replace-with-a-random-bridge-key",
+    "replace-with-your-bridge-key",
+    "your-bridge-key",
+    "changeme",
+    "change-me",
+    "password",
+    "default",
+  ]).has(normalized);
+}
+
+function readBridgeKey(req: Request): string | null {
+  const headerKey = req.header("x-auto-doc-bridge-key")?.trim();
+  if (headerKey) {
+    return headerKey;
+  }
+  const auth = req.header("authorization")?.trim();
+  const match = auth?.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+function assertBridgeCanRun(host: string): void {
+  const bridgeKey = process.env.AUTO_DOC_BRIDGE_API_KEY?.trim();
+  if (isUnsafeBridgeKey(bridgeKey)) {
+    throw new Error("AUTO_DOC_BRIDGE_API_KEY must be a real non-default credential.");
+  }
+  if (!bridgeKey && !isLoopbackBindHost(host)) {
+    throw new Error("AUTO_DOC_BRIDGE_API_KEY is required when the HTTP bridge is bound to a non-loopback host.");
+  }
+}
+
+function requireBridgeAccess(req: Request): { ok: true } | { ok: false; status: 401; error: string } {
+  const expected = process.env.AUTO_DOC_BRIDGE_API_KEY?.trim();
+  if (!expected || isUnsafeBridgeKey(expected)) {
+    return { ok: false, status: 401, error: "Missing or invalid bridge API key." };
+  }
+  const provided = readBridgeKey(req);
+  if (!provided || !bridgeKeyMatches(provided, expected)) {
+    return { ok: false, status: 401, error: "Missing or invalid bridge API key." };
+  }
+  return { ok: true };
+}
+
+function normalizeOrigin(origin: string): string | null {
+  try {
+    const parsed = new URL(origin);
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function originMatchesAllowed(origin: string, allowedOrigin: string): boolean {
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) {
+    return false;
+  }
+
+  const allowed = allowedOrigin.trim();
+  if (allowed.startsWith("*.")) {
+    const originUrl = new URL(normalized);
+    const suffix = allowed.slice(1).toLowerCase();
+    return originUrl.hostname.toLowerCase().endsWith(suffix) && originUrl.hostname.length > suffix.length;
+  }
+
+  return normalized === normalizeOrigin(allowed);
+}
+
+type BridgeTokenResolution =
+  | { ok: true; notionToken: string }
+  | { ok: false; status: 401; error: string };
+
+function resolveBridgeNotionToken(req: Request, input?: { allowUnauthenticatedDiscovery?: boolean }): BridgeTokenResolution {
+  const headerToken = req.header("x-notion-token")?.trim();
+  if (headerToken && headerToken.length > 0) {
+    return { ok: true, notionToken: headerToken };
+  }
+
+  const envFallbackEnabled = isTruthyEnv(process.env.AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK);
+  const envToken = process.env.NOTION_TOKEN?.trim();
+  if (envFallbackEnabled && envToken && envToken.length > 0) {
+    return { ok: true, notionToken: envToken };
+  }
+
+  if (input?.allowUnauthenticatedDiscovery === true) {
+    return { ok: true, notionToken: "" };
+  }
+
+  return {
+    ok: false,
+    status: 401,
+    error:
+      "Missing request Notion token. Provide x-notion-token, or explicitly enable AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK=true for trusted local deployments.",
+  };
 }
 
 type ToolCallResult = {
@@ -151,6 +276,7 @@ type StartupPreflightSummary = {
   provider: {
     candidateId: string;
     healthy: boolean;
+    tiers: ProviderTierPreflightResult[];
     bifrostRouteValidation: ReturnType<typeof validateBifrostRouteConfig>;
   };
   runner: {
@@ -388,18 +514,21 @@ async function resolveRunnerTriggerInput(request: RunnerTriggerRequest): Promise
 }
 
 async function buildStartupPreflightSummary(host: string, port: number): Promise<StartupPreflightSummary> {
+  assertProductionSecretConfig();
   const runtime = getOptionalRuntimeConfig();
   const warnings: string[] = [];
   let candidateId = "deterministic";
   let healthy = false;
+  let providerTiers: ProviderTierPreflightResult[] = [];
 
   try {
     const candidate = buildCandidate();
     candidateId = candidate.id;
-    healthy = await candidate.healthCheck().catch(() => false);
+    providerTiers = await preflightProviderTiers();
+    healthy = providerTiers.find((tier) => tier.providerId === candidate.id)?.healthy ?? false;
 
     if (!healthy) {
-      warnings.push(`Provider ${candidate.id} health check failed. Deterministic fallback may be used.`);
+      warnings.push(`Provider ${candidate.id} generation preflight failed. Deterministic fallback may be used.`);
     }
   } catch (error) {
     candidateId = "unavailable";
@@ -445,6 +574,7 @@ async function buildStartupPreflightSummary(host: string, port: number): Promise
     provider: {
       candidateId,
       healthy,
+      tiers: providerTiers,
       bifrostRouteValidation,
     },
     runner: {
@@ -1080,12 +1210,10 @@ export async function processAiSessionWebhookEvent(input: {
   });
 }
 
-export async function startHttpBridge(options?: { port?: number; host?: string }): Promise<void> {
+export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
   const app = express();
-  const envPortRaw = process.env.AUTO_DOC_HTTP_PORT?.trim();
-  const envPort = envPortRaw ? Number.parseInt(envPortRaw, 10) : NaN;
-  const port = options?.port ?? (Number.isInteger(envPort) && envPort > 0 ? envPort : DEFAULT_PORT);
-  const host = options?.host ?? (process.env.AUTO_DOC_HTTP_HOST?.trim() || "127.0.0.1");
+  const { port, host } = resolveHttpBridgeListenOptions(options);
+  assertBridgeCanRun(host);
   const replayProtector = createReplayProtector({
     ttlMs: Number(process.env.WEBHOOK_REPLAY_TTL_MS ?? DEFAULT_REPLAY_TTL_MS),
   });
@@ -1101,7 +1229,7 @@ export async function startHttpBridge(options?: { port?: number; host?: string }
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.some((allowedOrigin) => origin.startsWith(allowedOrigin))) {
+        if (!origin || allowedOrigins.some((allowedOrigin) => originMatchesAllowed(origin, allowedOrigin))) {
           callback(null, true);
           return;
         }
@@ -1336,7 +1464,19 @@ export async function startHttpBridge(options?: { port?: number; host?: string }
     });
   });
 
-  app.get("/runner/status", async (_req, res) => {
+  app.get("/runner/status", async (req, res) => {
+    const bridgeAuth = requireBridgeAccess(req);
+    if (!bridgeAuth.ok) {
+      res.status(bridgeAuth.status).json({ ok: false, error: bridgeAuth.error });
+      return;
+    }
+
+    const auth = resolveBridgeNotionToken(req);
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
+      return;
+    }
+
     try {
       const { targets, configurationError } = await buildRunnerStatusTargets();
       res.json({
@@ -1357,10 +1497,24 @@ export async function startHttpBridge(options?: { port?: number; host?: string }
   });
 
   app.post("/runner/trigger", async (req: Request, res: Response) => {
+    const bridgeAuth = requireBridgeAccess(req);
+    if (!bridgeAuth.ok) {
+      res.status(bridgeAuth.status).json({ ok: false, error: bridgeAuth.error });
+      return;
+    }
+
+    const auth = resolveBridgeNotionToken(req);
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
+      return;
+    }
+
     try {
       const requested = parseRunnerTriggerRequest(req.body);
       const triggerInput = await resolveRunnerTriggerInput(requested);
-      const result = await executeAutonomousDocumentationTrigger(triggerInput);
+      const result = await runWithRuntimeContext({ notionToken: auth.notionToken }, async () =>
+        executeAutonomousDocumentationTrigger(triggerInput),
+      );
       res.status(200).json({
         ok: true,
         triggerInput: {
@@ -1440,32 +1594,31 @@ export async function startHttpBridge(options?: { port?: number; host?: string }
   });
 
   app.get("/sse", async (req: Request, res: Response) => {
-    const headerToken = req.header("x-notion-token")?.trim();
-    const envToken = process.env.NOTION_TOKEN?.trim();
-    const sessionToken = headerToken && headerToken.length > 0 ? headerToken : envToken;
-    const allowUnauthenticatedSse = isTruthyEnv(process.env.AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE);
-
-    if ((!sessionToken || sessionToken.length === 0) && !allowUnauthenticatedSse) {
-      res.status(401).json({
-        ok: false,
-        error: "Missing Notion token. Provide x-notion-token, set NOTION_TOKEN, or enable AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE=true for local tool discovery.",
-      });
+    const bridgeAuth = requireBridgeAccess(req);
+    if (!bridgeAuth.ok) {
+      res.status(bridgeAuth.status).json({ ok: false, error: bridgeAuth.error });
       return;
     }
 
-    const resolvedSessionToken = sessionToken && sessionToken.length > 0 ? sessionToken : "";
+    const auth = resolveBridgeNotionToken(req, {
+      allowUnauthenticatedDiscovery: isTruthyEnv(process.env.AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE),
+    });
+    if (!auth.ok) {
+      res.status(auth.status).json({ ok: false, error: auth.error });
+      return;
+    }
 
     const transport = new SSEServerTransport("/messages", res);
     const sessionId = transport.sessionId;
     transports[sessionId] = transport;
-    sessionNotionTokens[sessionId] = resolvedSessionToken;
+    sessionNotionTokens[sessionId] = auth.notionToken;
     transport.onclose = () => {
       delete transports[sessionId];
       delete sessionNotionTokens[sessionId];
     };
 
     const server = createServer();
-    await runWithRuntimeContext({ notionToken: resolvedSessionToken }, async () => {
+    await runWithRuntimeContext({ notionToken: auth.notionToken, bridge: { remote: true } }, async () => {
       await server.connect(transport);
     });
   });
@@ -1484,10 +1637,17 @@ export async function startHttpBridge(options?: { port?: number; host?: string }
     }
 
     const sessionNotionToken = sessionNotionTokens[sessionId];
-    await runWithRuntimeContext({ notionToken: sessionNotionToken }, async () => {
+    await runWithRuntimeContext({ notionToken: sessionNotionToken, bridge: { remote: true } }, async () => {
       await transport.handlePostMessage(req, res, req.body);
     });
   });
+
+  return app;
+}
+
+export async function startHttpBridge(options?: HttpBridgeOptions): Promise<void> {
+  const { port, host } = resolveHttpBridgeListenOptions(options);
+  const app = createHttpBridgeApp(options);
 
   await new Promise<void>((resolve) => {
     app.listen(port, host, () => {

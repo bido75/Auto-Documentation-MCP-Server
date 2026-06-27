@@ -5,5 +5,10 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    isolate: true,
+    fileParallelism: true,
+    maxWorkers: 4,
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });

@@ -1,9 +1,10 @@
-// @ts-nocheck
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { executeAutonomousDocumentationTrigger } from "../orchestrator/auto-doc-orchestrator.js";
-export function registerRunAutonomousDocumentationTriggerTool(server) {
+
+export function registerRunAutonomousDocumentationTriggerTool(server: McpServer) {
     server.tool("run_autonomous_documentation_trigger", "Runs autonomous documentation flow from local git changes through analyze and upsert.", {
         projectId: z.string(),
         repoPath: z.string().optional(),

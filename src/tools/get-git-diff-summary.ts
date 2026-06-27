@@ -4,6 +4,7 @@ import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { redactSecrets } from "../lib/redaction.js";
+import { assertRepoPathAllowed } from "../lib/repo-paths.js";
 
 function truncate(input: string, max = 8000): string {
   return input.length <= max ? input : `${input.slice(0, max)}\n\n[TRUNCATED]`;
@@ -31,7 +32,8 @@ export function registerGetGitDiffSummaryTool(server: McpServer) {
       });
 
       try {
-        const git = simpleGit(repoPath);
+        const safeRepoPath = await assertRepoPathAllowed(repoPath);
+        const git = simpleGit(safeRepoPath);
         const raw =
           mode === "last_commit"
             ? await git.show(["--stat", "--summary", "HEAD"])

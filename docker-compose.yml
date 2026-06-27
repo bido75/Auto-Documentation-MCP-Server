@@ -54,7 +54,9 @@ services:
       - "3000:3000"
     environment:
       NOTION_TOKEN: ${NOTION_TOKEN:-}
-      AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE: ${AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE:-true}
+      AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE: ${AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE:-false}
+      AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK: ${AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK:-false}
+      AUTO_DOC_BRIDGE_API_KEY: ${AUTO_DOC_BRIDGE_API_KEY:?Set AUTO_DOC_BRIDGE_API_KEY before exposing the HTTP bridge}
       AUTO_DOC_HTTP_HOST: 0.0.0.0
       AUTO_DOC_HTTP_PORT: 3000
       AI_PROVIDER_TYPE: ${AI_PROVIDER_TYPE:-bifrost}
@@ -71,7 +73,7 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,https://verdent.ai}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       AI_SESSION_WEBHOOK_SECRET: ${AI_SESSION_WEBHOOK_SECRET:-}
-      STATE_ENCRYPTION_KEY: ${STATE_ENCRYPTION_KEY:-change-this-for-self-hosted}
+      STATE_ENCRYPTION_KEY: ${STATE_ENCRYPTION_KEY:?Set STATE_ENCRYPTION_KEY to a unique high-entropy value before running production services}
     command: ["node", "build/src/cli/index.js", "bridge"]
     networks:
       - ai-mesh

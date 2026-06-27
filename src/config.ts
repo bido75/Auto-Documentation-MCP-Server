@@ -15,6 +15,7 @@ export interface OptionalRuntimeConfig {
   notionToken?: string;
   corsAllowedOrigins: string[];
   stateEncryptionKey: string;
+  artifactRoot: string;
   bifrostEndpoint: string;
   bifrostVirtualKey: string;
   provider: {
@@ -24,6 +25,7 @@ export interface OptionalRuntimeConfig {
     modelName: string;
     fallbackModels: string[];
     cloudFallbackModel?: string;
+    cloudFallbackModels: string[];
     cloudFallbackEndpoint: string;
     cloudFallbackApiKey?: string;
     temperature: number;
@@ -39,6 +41,10 @@ export interface OptionalRuntimeConfig {
     modelName: string;
     similarityThreshold: number;
     indexPath: string;
+  };
+  authoring: {
+    dedicatedEnabled: boolean;
+    maxConcurrent: number;
   };
   publishing: {
     mode: string;
@@ -89,15 +95,76 @@ function envBool(key: string, fallback: boolean, env: NodeJS.ProcessEnv): boolea
   return value === "true";
 }
 
+export const DEFAULT_STATE_ENCRYPTION_KEY = "auto-doc-mcp-default-dev-key-change-me";
+export const DEFAULT_CLOUD_FALLBACK_MODELS = [
+  "qwen/qwen3-next-80b-a3b-instruct:free",
+  "qwen/qwen3-next-80b-a3b-instruct",
+  "qwen/qwen3-coder-flash",
+];
+
+function parseCsv(value: string | undefined): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function resolveCloudFallbackModels(env: NodeJS.ProcessEnv): string[] {
+  const configuredList = parseCsv(env.AI_CLOUD_FALLBACK_MODELS);
+  if (configuredList.length > 0) {
+    return configuredList.slice(0, 3);
+  }
+
+  const legacySingle = env.AI_CLOUD_FALLBACK_MODEL?.trim();
+  if (legacySingle) {
+    return [legacySingle];
+  }
+
+  return DEFAULT_CLOUD_FALLBACK_MODELS;
+}
+
+const PLACEHOLDER_STATE_ENCRYPTION_KEYS = new Set([
+  DEFAULT_STATE_ENCRYPTION_KEY,
+  "change-this-for-self-hosted",
+  "change-this-to-a-random-32-char-string-in-production",
+]);
+
+export class ProductionSecretConfigError extends Error {
+  readonly code = "PRODUCTION_SECRET_CONFIG_INVALID";
+
+  constructor(message: string) {
+    super(message);
+    this.name = "ProductionSecretConfigError";
+  }
+}
+
+export function assertProductionSecretConfig(env = process.env): void {
+  const nodeEnv = env.NODE_ENV?.trim().toLowerCase();
+  const runtimeMode = env.AUTO_DOC_RUNTIME_MODE?.trim().toLowerCase();
+  const productionLike = nodeEnv === "production" || runtimeMode === "runner" || runtimeMode === "bridge";
+  if (!productionLike) {
+    return;
+  }
+
+  const key = env.STATE_ENCRYPTION_KEY?.trim();
+  if (!key || PLACEHOLDER_STATE_ENCRYPTION_KEYS.has(key)) {
+    throw new ProductionSecretConfigError(
+      "STATE_ENCRYPTION_KEY must be set to a unique high-entropy value before running Auto-Doc in production, runner, or bridge mode.",
+    );
+  }
+}
+
 export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConfig {
   const bifrostVk = env.BIFROST_VIRTUAL_KEY?.trim() || "";
+  const cloudFallbackModels = resolveCloudFallbackModels(env);
   return {
     notionToken: env.NOTION_TOKEN?.trim() || undefined,
     corsAllowedOrigins: envString("CORS_ALLOWED_ORIGINS", "http://localhost", env)
       .split(",")
       .map((value) => value.trim())
       .filter(Boolean),
-    stateEncryptionKey: envString("STATE_ENCRYPTION_KEY", "auto-doc-mcp-default-dev-key-change-me", env),
+    stateEncryptionKey: envString("STATE_ENCRYPTION_KEY", DEFAULT_STATE_ENCRYPTION_KEY, env),
+    artifactRoot: envString("AUTO_DOC_ARTIFACT_ROOT", ".auto-doc/artifacts", env),
     bifrostEndpoint: envString("BIFROST_ENDPOINT", "http://bifrost-gateway:8080", env),
     bifrostVirtualKey: bifrostVk,
     provider: {
@@ -108,11 +175,12 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
       fallbackModels: [env.AI_FALLBACK_MODEL_1?.trim(), env.AI_FALLBACK_MODEL_2?.trim(), env.AI_FALLBACK_MODEL_3?.trim()].filter(
         (value): value is string => Boolean(value),
       ),
-      cloudFallbackModel: env.AI_CLOUD_FALLBACK_MODEL?.trim() || undefined,
+      cloudFallbackModel: cloudFallbackModels[0],
+      cloudFallbackModels,
       cloudFallbackEndpoint: envString("OPENROUTER_ENDPOINT", "https://openrouter.ai/api/v1", env),
       cloudFallbackApiKey: env.OPENROUTER_API_KEY?.trim() || undefined,
       temperature: envFloat("AI_TEMPERATURE", 0.2, env),
-      timeoutMs: envInt("AI_TIMEOUT_MS", 45000, env),
+      timeoutMs: envInt("AI_TIMEOUT_MS", 90000, env),
       maxRetries: envInt("AI_MAX_RETRIES", 2, env),
       fallbackToDeterm: envBool("AI_FALLBACK_TO_DETERMINISTIC", true, env),
       bifrostVk,
@@ -125,6 +193,10 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
       similarityThreshold: envFloat("EMBEDDING_SIMILARITY_THRESHOLD", 0.92, env),
       indexPath: envString("EMBEDDING_INDEX_PATH", ".auto-doc-mcp/embeddings.json", env),
     },
+    authoring: {
+      dedicatedEnabled: envBool("AUTO_DOC_DEDICATED_AUTHORING_ENABLED", true, env),
+      maxConcurrent: Math.max(1, envInt("AUTO_DOC_AUTHORING_MAX_CONCURRENT", 2, env)),
+    },
     publishing: {
       mode: envString("PUBLISHING_MODE", "balanced", env),
       autoPublishThreshold: envInt("AUTO_PUBLISH_THRESHOLD", 90, env),
@@ -134,7 +206,7 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
       maxConcurrentTargets: envInt("RUNNER_MAX_CONCURRENT", 4, env),
       maxConsecutiveFailures: envInt("RUNNER_MAX_FAILURES", 5, env),
       circuitResetAfterMs: envInt("RUNNER_CIRCUIT_RESET_MS", 300000, env),
-      perTargetTimeoutMs: envInt("RUNNER_TARGET_TIMEOUT_MS", 60000, env),
+      perTargetTimeoutMs: envInt("RUNNER_TARGET_TIMEOUT_MS", envInt("AI_TIMEOUT_MS", 90000, env), env),
     },
     prompts: {
       analyzerPromptName: envString("AUTO_DOC_ANALYZER_PROMPT_NAME", "auto-doc-analyzer", env),
@@ -153,6 +225,7 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
 }
 
 export function getRuntimeConfig(env = process.env): RuntimeConfig {
+  assertProductionSecretConfig(env);
   const runtime = getOptionalRuntimeConfig(env);
   assertNotionTokenPresent(runtime.notionToken);
   const resolvedNotionToken = runtime.notionToken as string;
