@@ -1,6 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { resolveArtifactPath } from "./artifact-paths.js";
+import { isPrivateOrMetadataHost } from "./network-security.js";
 
 export class ScreenshotCaptureError extends Error {
   constructor(
@@ -28,22 +29,6 @@ function hostMatchesAllowlist(hostname: string, allowlist: string[]): boolean {
     }
     return host === entry;
   });
-}
-
-function isPrivateOrMetadataHost(hostname: string): boolean {
-  const host = hostname.toLowerCase();
-  if (host === "localhost" || host === "metadata.google.internal" || host === "169.254.169.254" || host === "::1") {
-    return true;
-  }
-  if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)) {
-    return true;
-  }
-  const match172 = host.match(/^172\.(\d+)\./);
-  if (match172) {
-    const second = Number(match172[1]);
-    return second >= 16 && second <= 31;
-  }
-  return false;
 }
 
 function assertCaptureTargetAllowed(url: string, env: NodeJS.ProcessEnv): URL {

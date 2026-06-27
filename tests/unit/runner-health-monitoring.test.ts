@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  emitRunnerHealthAlert,
   getRunnerHealth,
   recordRunnerTickHealth,
   type RunnerHealthSnapshot,
@@ -327,6 +328,32 @@ describe("runner silent-failure monitoring", () => {
     expect(firstLines).toHaveLength(1);
     expect(secondLines).toHaveLength(2);
     expect(secondLines.map((line) => line.traceId)).toEqual(["trace-restart-1", "trace-restart-2"]);
+  });
+
+  it("redacts secret-shaped values before persisting alert data to health and JSONL files", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "auto-doc-health-"));
+    const env = envFor(join(dir, "health.json"));
+    const tokenValue = "fixtureSecretValueForRedaction1234567890";
+
+    await emitRunnerHealthAlert({
+      traceId: "trace-redacted-feed",
+      env,
+      failureMode: "runner_tick_failure_threshold",
+      severity: "critical",
+      message: "Synthetic alert for redaction test",
+      data: {
+        nested: {
+          error: `Notion call failed with NOTION_TOKEN=${tokenValue}`,
+          authorization: `Bearer ${tokenValue}`,
+        },
+      },
+    });
+
+    const healthRaw = await readFile(env.AUTO_DOC_HEALTH_FILE!, "utf8");
+    const feedRaw = await readFile(env.AUTO_DOC_ALERT_FEED_FILE!, "utf8");
+    expect(healthRaw).not.toContain(tokenValue);
+    expect(feedRaw).not.toContain(tokenValue);
+    expect(feedRaw).toContain("[REDACTED]");
   });
 
   it("registers health_check and returns the persisted health object with stale status", async () => {

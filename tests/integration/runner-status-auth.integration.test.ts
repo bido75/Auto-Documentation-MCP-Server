@@ -40,6 +40,7 @@ describe("secure-runner-status-exposure", () => {
     setEnv("AUTO_DOC_RUNNER_PROJECT_ID", "project_1");
     setEnv("AUTO_DOC_RUNNER_REPO_PATH", "C:/repo");
     setEnv("AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK", undefined);
+    setEnv("AUTO_DOC_BRIDGE_API_KEY", "rs");
     setEnv("NOTION_TOKEN", "env_token_must_not_authenticate_anonymous_status");
     const store = new StateStore(process.env.AUTO_DOC_STATE_FILE);
     await store.upsertProject({
@@ -66,7 +67,15 @@ describe("secure-runner-status-exposure", () => {
       const anonymous = await fetch(`${baseUrl}/runner/status`);
       expect(anonymous.status).toBe(401);
 
-      const authed = await fetch(`${baseUrl}/runner/status`, { headers: { "x-notion-token": "request_token" } });
+      const notionTokenOnly = await fetch(`${baseUrl}/runner/status`, { headers: { "x-notion-token": "request_token" } });
+      expect(notionTokenOnly.status).toBe(401);
+
+      const authed = await fetch(`${baseUrl}/runner/status`, {
+        headers: {
+          authorization: "Bearer rs",
+          "x-notion-token": "request_token",
+        },
+      });
       expect(authed.status).toBe(200);
       const payload = (await authed.json()) as { targetCount: number; targets: Array<{ projectId: string; repoPath: string }> };
       expect(payload.targetCount).toBe(1);

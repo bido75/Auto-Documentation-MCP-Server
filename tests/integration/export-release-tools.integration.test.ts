@@ -14,6 +14,8 @@ const testContext = vi.hoisted(() => ({
   providerHealthy: true,
 }));
 
+let previousAllowedRoots: string | undefined;
+
 vi.mock("../../src/lib/notion-client.js", () => ({
   createNotionClient: () => {
     if (!testContext.notion) {
@@ -347,6 +349,8 @@ async function handlerFor(register: (server: McpServer) => void, name: string): 
 }
 
 beforeEach(() => {
+  previousAllowedRoots = process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
+  process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = "C:/repo";
   testContext.notion = null;
   testContext.store = null;
   testContext.pdfCalls = [];
@@ -361,6 +365,8 @@ afterEach(() => {
   delete process.env.AI_MODEL_NAME;
   delete process.env.AI_API_KEY;
   delete process.env.AUTO_DOC_ARTIFACT_ROOT;
+  if (previousAllowedRoots === undefined) delete process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
+  else process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = previousAllowedRoots;
 });
 
 describe("export and release tools", () => {

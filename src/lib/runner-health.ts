@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { logToolEvent, resolveTraceId } from "./logger.js";
+import { logToolEvent, redactJsonValue, resolveTraceId } from "./logger.js";
 import { resolveStateStorePath } from "./state-store.js";
 
 export type RunnerHealthStatus = "healthy" | "degraded" | "failing";
@@ -324,7 +324,7 @@ async function appendAlertFeedLine(
     lastProviderTierUsed: state.lastProviderTierUsed,
     healthFile: config.healthFile,
     alertFeedFile: config.alertFeedFile,
-    data: alert.data,
+    data: redactJsonValue(alert.data),
   };
   const handle = await open(config.alertFeedFile, "a");
   try {
@@ -372,7 +372,7 @@ async function emitAlert(
     severity: input.severity,
     message: input.message,
     traceId: input.traceId,
-    data: input.data,
+    data: redactJsonValue(input.data) as Record<string, unknown>,
   };
 
   state.status = statusForAlert(input.failureMode);

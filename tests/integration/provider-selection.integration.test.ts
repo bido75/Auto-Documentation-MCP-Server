@@ -140,12 +140,14 @@ afterEach(() => {
   delete process.env.AI_ENDPOINT;
   delete process.env.AI_API_KEY;
   delete process.env.AI_MODEL_NAME;
+  delete process.env.AUTO_DOC_PROVIDER_ALLOW_LOCAL_ENDPOINTS;
 });
 
 describe("prove-real-provider-selection", () => {
   it("configure_ai_provider changes the concrete provider used by the real factory and analyzer", async () => {
     await createAnalyzeFixture();
     const providerServer = await startOpenAiServer();
+    process.env.AUTO_DOC_PROVIDER_ALLOW_LOCAL_ENDPOINTS = "true";
     try {
       await runWithRuntimeContext({}, async () => {
         const { configure, analyze } = await handlers();
@@ -180,6 +182,7 @@ describe("prove-real-provider-selection", () => {
 
   it("provider failure still falls back to deterministic analysis without mocking factory.ts", async () => {
     await createAnalyzeFixture();
+    process.env.AUTO_DOC_PROVIDER_ALLOW_LOCAL_ENDPOINTS = "true";
     await runWithRuntimeContext({}, async () => {
       const { configure, analyze } = await handlers();
       await configure({

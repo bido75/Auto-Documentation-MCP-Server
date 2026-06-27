@@ -67,7 +67,7 @@ function isSecretKey(key: string): boolean {
   return /token|secret|password|api[_-]?key|private[_-]?key|access[_-]?token|authorization/i.test(key);
 }
 
-function redactJsonValue(value: unknown, keyHint?: string): unknown {
+export function redactJsonValue(value: unknown, keyHint?: string): unknown {
   if (keyHint && isSecretKey(keyHint) && value !== undefined && value !== null) {
     return "[REDACTED]";
   }

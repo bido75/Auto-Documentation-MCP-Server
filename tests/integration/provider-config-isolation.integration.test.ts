@@ -27,6 +27,7 @@ class FakeServer {
 const providerEnvKeys = ["AI_PROVIDER_TYPE", "AI_ENDPOINT", "AI_API_KEY", "AI_MODEL_NAME"] as const;
 let cwdBefore = process.cwd();
 let envSnapshot: Record<(typeof providerEnvKeys)[number], string | undefined>;
+let allowLocalEndpointSnapshot: string | undefined;
 
 function configureHandler(): ToolHandler {
   const server = new FakeServer();
@@ -51,8 +52,10 @@ beforeEach(async () => {
   resetProvider();
   cwdBefore = process.cwd();
   envSnapshot = snapshotProviderEnv();
+  allowLocalEndpointSnapshot = process.env.AUTO_DOC_PROVIDER_ALLOW_LOCAL_ENDPOINTS;
   process.chdir(await mkdtemp(join(tmpdir(), "auto-doc-provider-isolation-")));
   for (const key of providerEnvKeys) delete process.env[key];
+  process.env.AUTO_DOC_PROVIDER_ALLOW_LOCAL_ENDPOINTS = "true";
 });
 
 afterEach(() => {
@@ -63,6 +66,8 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+  if (allowLocalEndpointSnapshot === undefined) delete process.env.AUTO_DOC_PROVIDER_ALLOW_LOCAL_ENDPOINTS;
+  else process.env.AUTO_DOC_PROVIDER_ALLOW_LOCAL_ENDPOINTS = allowLocalEndpointSnapshot;
 });
 
 describe("isolate-provider-config-mutation", () => {

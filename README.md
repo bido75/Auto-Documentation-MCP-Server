@@ -39,6 +39,7 @@ npm run dev
 - `NOTION_PARENT_PAGE_ID` for live integration tests
 - `RUN_LIVE_NOTION_TESTS=true` to enable env-gated live tests
 - `BIFROST_VIRTUAL_KEY` for Bifrost-backed AI calls when the provider is `bifrost`
+- `AUTO_DOC_BRIDGE_API_KEY` for HTTP-SSE bridge access; required to open `/sse`, `/runner/status`, and `/runner/trigger`
 - `AUTO_DOC_RUNNER_PROJECT_ID` and `AUTO_DOC_RUNNER_REPO_PATH` to enable the continuous runner
 - `AUTO_DOC_RUNNER_TARGETS` to configure multiple runner targets in one JSON payload
 - `SELF_DOC_PROJECT_ID` and `SELF_DOC_REPO_PATH` are separate runtime config values; they are not the runner source of truth
@@ -57,7 +58,7 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 
 ## Runtime Modes
 
-Container default: HTTP bridge mode. The Docker image starts `node build/src/cli/index.js bridge`, exposes `/health`, and is intended for web, Bifrost, and tunnel deployments.
+Container default: HTTP bridge mode. The Docker image starts `node build/src/cli/index.js bridge`, exposes `/health`, and is intended for web, Bifrost, and tunnel deployments. Set `AUTO_DOC_BRIDGE_API_KEY` before opening MCP or runner sessions; non-loopback binds fail closed without a configured, non-placeholder key.
 
 Use stdio MCP locally with `npm run dev` or `node build/src/index.js`. Use continuous mode with `AUTO_DOC_RUNTIME_MODE=runner node build/src/index.js` or `node build/src/cli/index.js runner` after configuring runner targets.
 

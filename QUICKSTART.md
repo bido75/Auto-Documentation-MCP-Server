@@ -69,11 +69,12 @@ NOTION_PARENT_PAGE_ID=36ed217c67b180b5b2d0c2a2ca5128f8
 RUN_LIVE_NOTION_TESTS=false
 
 # Bridge transport
-AUTO_DOC_HTTP_HOST=0.0.0.0
+AUTO_DOC_HTTP_HOST=127.0.0.1
 AUTO_DOC_HTTP_PORT=3000
 AUTO_DOC_RUNTIME_MODE=bridge
+AUTO_DOC_BRIDGE_API_KEY=
 AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE=false
-AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK=true
+AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK=false
 CORS_ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 
 # Local Docker Ollama provider
@@ -103,6 +104,12 @@ GITHUB_WEBHOOK_SECRET=replace-with-a-random-string-if-you-use-webhooks
 ```
 
 Newer Notion internal integrations issue tokens prefixed `ntn_`; paste the exact token your integration shows.
+
+Generate a real bridge key before starting bridge mode, then paste it into `AUTO_DOC_BRIDGE_API_KEY`:
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+```
 
 By default, Auto-Doc stores encrypted project state at `~/.auto-doc-mcp/state.json`. Leave `AUTO_DOC_STATE_FILE` unset for normal bridge and runner deployments so restarts resume the same project even when the process starts from a different working directory. Set `AUTO_DOC_STATE_FILE` only for isolated tests or intentionally separate environments; an explicit override starts from that file and does not auto-migrate legacy state.
 
@@ -155,7 +162,7 @@ The bridge uses HTTP-SSE:
 For a manual smoke test, open the SSE stream in one terminal and copy the `sessionId` from the server event:
 
 ```bash
-curl -N http://localhost:3000/sse
+curl -N -H "Authorization: Bearer <your-bridge-key>" http://localhost:3000/sse
 ```
 
 In the examples below, replace:

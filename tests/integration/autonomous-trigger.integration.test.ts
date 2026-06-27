@@ -168,7 +168,9 @@ function parseTool<T>(result: { content: Array<{ text: string }> }): T {
 describe("run_autonomous_documentation_trigger", () => {
   it("captures, analyzes, upserts, publishes, and is idempotent for the same trigger", async () => {
     const previousToken = process.env.NOTION_TOKEN;
+    const previousAllowedRoots = process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
     process.env.NOTION_TOKEN = "test_token";
+    process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = "C:/repo";
 
     try {
       const stateDir = await mkdtemp(join(tmpdir(), "auto-doc-autonomous-"));
@@ -272,6 +274,11 @@ describe("run_autonomous_documentation_trigger", () => {
         delete process.env.NOTION_TOKEN;
       } else {
         process.env.NOTION_TOKEN = previousToken;
+      }
+      if (previousAllowedRoots === undefined) {
+        delete process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
+      } else {
+        process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = previousAllowedRoots;
       }
     }
   });

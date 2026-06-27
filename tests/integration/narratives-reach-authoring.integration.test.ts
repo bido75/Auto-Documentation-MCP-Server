@@ -241,7 +241,9 @@ describe("narratives-reach-authoring", () => {
 
   it("orchestrator passes provider narratives into authored User and Admin manual entries", async () => {
     const previousToken = process.env.NOTION_TOKEN;
+    const previousAllowedRoots = process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
     process.env.NOTION_TOKEN = "test_token";
+    process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = "C:/repo";
     try {
       await seedProject("project_orchestrator");
       const server = new FakeServer();
@@ -272,6 +274,8 @@ describe("narratives-reach-authoring", () => {
     } finally {
       if (previousToken === undefined) delete process.env.NOTION_TOKEN;
       else process.env.NOTION_TOKEN = previousToken;
+      if (previousAllowedRoots === undefined) delete process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
+      else process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = previousAllowedRoots;
     }
   });
 });

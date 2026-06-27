@@ -5,7 +5,8 @@ import { z } from "zod";
 import { buildCandidate, resetProvider } from "../providers/factory.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
-import { setRuntimeProviderConfig } from "../lib/runtime-context.js";
+import { assertSafeHttpEndpoint } from "../lib/network-security.js";
+import { getRuntimeContext, setRuntimeProviderConfig } from "../lib/runtime-context.js";
 import { storeApiKey } from "../installer/token-store.js";
 
 type ConfigureAiProviderInput = {
@@ -36,6 +37,28 @@ function upsertEnvContents(existing: string, updates: Record<string, string | un
         .map(([key, value]) => `${key}=${value}`)
         .join("\n")}\n`;
 }
+
+function isTruthy(value: string | undefined): boolean {
+    return value?.trim().toLowerCase() === "true";
+}
+
+function assertProviderConfigurationAllowed(input: { endpoint?: string; persistToEnv: boolean }): void {
+    const context = getRuntimeContext();
+    if (context.bridge?.remote && !isTruthy(process.env.AUTO_DOC_ALLOW_REMOTE_PROVIDER_CONFIG)) {
+        throw new Error("configure_ai_provider is disabled for remote bridge sessions by default.");
+    }
+    if (context.bridge?.remote && input.persistToEnv && !isTruthy(process.env.AUTO_DOC_ALLOW_REMOTE_PROVIDER_PERSIST)) {
+        throw new Error("persistToEnv is disabled for remote bridge sessions by default.");
+    }
+    if (input.endpoint) {
+        assertSafeHttpEndpoint({
+            url: input.endpoint,
+            purpose: "Provider endpoint",
+            allowPrivate: isTruthy(process.env.AUTO_DOC_PROVIDER_ALLOW_LOCAL_ENDPOINTS),
+        });
+    }
+}
+
 export function registerConfigureAiProviderTool(server: McpServer): void {
     server.tool("configure_ai_provider", "Set the AI model provider for documentation generation. Supports local Ollama, cloud Claude/GPT-4, Bifrost gateway, or deterministic mode.", {
         providerType: z.enum([
@@ -60,6 +83,7 @@ export function registerConfigureAiProviderTool(server: McpServer): void {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         try {
+            assertProviderConfigurationAllowed({ endpoint, persistToEnv });
             setRuntimeProviderConfig({
                 type: providerType,
                 endpoint,

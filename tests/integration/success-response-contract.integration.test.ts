@@ -563,20 +563,28 @@ describe("tool success response contract", () => {
     expect(screenshot).toBeDefined();
 
     const repoDir = await mkdtemp(join(tmpdir(), "auto-doc-git-success-"));
+    const previousAllowedRoots = process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
+    process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = repoDir;
     const git = simpleGit(repoDir);
-    await git.init();
-    await writeFile(join(repoDir, "README.md"), "hello\n", "utf-8");
+    let summary!: { traceId: string; mode: string; summary: string };
+    try {
+      await git.init();
+      await writeFile(join(repoDir, "README.md"), "hello\n", "utf-8");
 
-    const summary = parseToolResult<{
-      traceId: string;
-      mode: string;
-      summary: string;
-    }>(
-      await diff!({
-        repoPath: repoDir,
-        mode: "working_tree",
-      }),
-    );
+      summary = parseToolResult<{
+        traceId: string;
+        mode: string;
+        summary: string;
+      }>(
+        await diff!({
+          repoPath: repoDir,
+          mode: "working_tree",
+        }),
+      );
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
+      else process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = previousAllowedRoots;
+    }
 
     expect(typeof summary.traceId).toBe("string");
     expect(summary.mode).toBe("working_tree");

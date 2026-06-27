@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { createHash } from "node:crypto";
 import { collectGitEvidence } from "../evidence/git.js";
 import { authorManualSection } from "../lib/manual-author.js";
+import { assertRepoPathAllowed } from "../lib/repo-paths.js";
 import { getStateStore, type ProjectState } from "../lib/state-store.js";
 import { registerAnalyzeDocumentationCandidateTool } from "../tools/analyze-documentation-candidate.js";
 import { registerCaptureDevelopmentEventTool } from "../tools/capture-development-event.js";
@@ -341,7 +342,8 @@ async function buildCaptureInput(input: AutonomousTriggerInput): Promise<Capture
     throw new Error("repoPath is required when summary evidence is not provided.");
   }
 
-  const evidence = await collectGitEvidence({ repoPath: input.repoPath, mode: input.mode });
+  const safeRepoPath = await assertRepoPathAllowed(input.repoPath);
+  const evidence = await collectGitEvidence({ repoPath: safeRepoPath, mode: input.mode });
 
   const captureInput: Omit<CaptureInput, "externalEventId"> = {
     projectId: input.projectId,
@@ -373,6 +375,7 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
   if (!project) {
     throw new Error("Unknown projectId. Run initialize_project_manual first.");
   }
+  const safeInput = input.repoPath ? { ...input, repoPath: await assertRepoPathAllowed(input.repoPath) } : input;
 
   const host = new InMemoryToolHost();
   const server = host as unknown as McpServer;
@@ -381,7 +384,7 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
   registerUpsertFeatureDocumentationTool(server);
   registerPublishOrQueueReviewTool(server);
 
-  const captureInput = await buildCaptureInput(input);
+  const captureInput = await buildCaptureInput(safeInput);
   const capture = parseToolResult<CaptureResponse>(await getHandler(host, "capture_development_event")(captureInput));
   const existingFeatureKeys = Object.keys(project.featuresByKey);
   const analysis = parseToolResult<AnalyzeResponse>(
@@ -399,8 +402,8 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
     return {
       ok: true,
       projectId: input.projectId,
-      repoPath: input.repoPath,
-      mode: input.mode,
+      repoPath: safeInput.repoPath,
+      mode: safeInput.mode,
       disposition: "duplicate",
       ...counts,
       capture,
@@ -415,8 +418,8 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
     return {
       ok: true,
       projectId: input.projectId,
-      repoPath: input.repoPath,
-      mode: input.mode,
+      repoPath: safeInput.repoPath,
+      mode: safeInput.mode,
       disposition: "skipped",
       ...counts,
       capture,
@@ -434,7 +437,7 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
       featureKey: analysis.featureKey,
       featureName: analysis.featureName,
       audiences: analysis.audiences,
-      manualEntries: await buildManualEntries({ analysis, captureInput, filesChanged: captureFilesChanged, repoPath: input.repoPath }),
+      manualEntries: await buildManualEntries({ analysis, captureInput, filesChanged: captureFilesChanged, repoPath: safeInput.repoPath }),
       evidenceEventIds: [capture.evidenceEventId],
       confidenceScore: analysis.confidenceScore,
       confidenceReasons: analysis.confidenceReasons,
@@ -464,8 +467,8 @@ export async function executeAutonomousDocumentationTrigger(input: AutonomousTri
   return {
     ok: true,
     projectId: input.projectId,
-    repoPath: input.repoPath,
-    mode: input.mode,
+      repoPath: safeInput.repoPath,
+      mode: safeInput.mode,
     disposition: "documented",
     ...counts,
     capture,

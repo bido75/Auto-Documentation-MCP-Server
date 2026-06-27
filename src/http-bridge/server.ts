@@ -40,6 +40,93 @@ function resolveHttpBridgeListenOptions(options?: HttpBridgeOptions): { port: nu
   return { port, host };
 }
 
+function isLoopbackBindHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
+}
+
+function bridgeKeyDigest(value: string): Buffer {
+  return createHmac("sha256", "auto-doc-bridge-api-key").update(value).digest();
+}
+
+function bridgeKeyMatches(provided: string, expected: string): boolean {
+  return timingSafeEqual(bridgeKeyDigest(provided), bridgeKeyDigest(expected));
+}
+
+function isUnsafeBridgeKey(value: string | undefined): boolean {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return new Set([
+    "replace-with-a-random-bridge-key",
+    "replace-with-your-bridge-key",
+    "your-bridge-key",
+    "changeme",
+    "change-me",
+    "password",
+    "default",
+  ]).has(normalized);
+}
+
+function readBridgeKey(req: Request): string | null {
+  const headerKey = req.header("x-auto-doc-bridge-key")?.trim();
+  if (headerKey) {
+    return headerKey;
+  }
+  const auth = req.header("authorization")?.trim();
+  const match = auth?.match(/^Bearer\s+(.+)$/i);
+  return match?.[1]?.trim() || null;
+}
+
+function assertBridgeCanRun(host: string): void {
+  const bridgeKey = process.env.AUTO_DOC_BRIDGE_API_KEY?.trim();
+  if (isUnsafeBridgeKey(bridgeKey)) {
+    throw new Error("AUTO_DOC_BRIDGE_API_KEY must be a real non-default credential.");
+  }
+  if (!bridgeKey && !isLoopbackBindHost(host)) {
+    throw new Error("AUTO_DOC_BRIDGE_API_KEY is required when the HTTP bridge is bound to a non-loopback host.");
+  }
+}
+
+function requireBridgeAccess(req: Request): { ok: true } | { ok: false; status: 401; error: string } {
+  const expected = process.env.AUTO_DOC_BRIDGE_API_KEY?.trim();
+  if (!expected || isUnsafeBridgeKey(expected)) {
+    return { ok: false, status: 401, error: "Missing or invalid bridge API key." };
+  }
+  const provided = readBridgeKey(req);
+  if (!provided || !bridgeKeyMatches(provided, expected)) {
+    return { ok: false, status: 401, error: "Missing or invalid bridge API key." };
+  }
+  return { ok: true };
+}
+
+function normalizeOrigin(origin: string): string | null {
+  try {
+    const parsed = new URL(origin);
+    return parsed.origin;
+  } catch {
+    return null;
+  }
+}
+
+function originMatchesAllowed(origin: string, allowedOrigin: string): boolean {
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) {
+    return false;
+  }
+
+  const allowed = allowedOrigin.trim();
+  if (allowed.startsWith("*.")) {
+    const originUrl = new URL(normalized);
+    const suffix = allowed.slice(1).toLowerCase();
+    return originUrl.hostname.toLowerCase().endsWith(suffix) && originUrl.hostname.length > suffix.length;
+  }
+
+  return normalized === normalizeOrigin(allowed);
+}
+
 type BridgeTokenResolution =
   | { ok: true; notionToken: string }
   | { ok: false; status: 401; error: string };
@@ -1126,6 +1213,7 @@ export async function processAiSessionWebhookEvent(input: {
 export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
   const app = express();
   const { port, host } = resolveHttpBridgeListenOptions(options);
+  assertBridgeCanRun(host);
   const replayProtector = createReplayProtector({
     ttlMs: Number(process.env.WEBHOOK_REPLAY_TTL_MS ?? DEFAULT_REPLAY_TTL_MS),
   });
@@ -1141,7 +1229,7 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.some((allowedOrigin) => origin.startsWith(allowedOrigin))) {
+        if (!origin || allowedOrigins.some((allowedOrigin) => originMatchesAllowed(origin, allowedOrigin))) {
           callback(null, true);
           return;
         }
@@ -1377,6 +1465,12 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
   });
 
   app.get("/runner/status", async (req, res) => {
+    const bridgeAuth = requireBridgeAccess(req);
+    if (!bridgeAuth.ok) {
+      res.status(bridgeAuth.status).json({ ok: false, error: bridgeAuth.error });
+      return;
+    }
+
     const auth = resolveBridgeNotionToken(req);
     if (!auth.ok) {
       res.status(auth.status).json({ ok: false, error: auth.error });
@@ -1403,6 +1497,12 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
   });
 
   app.post("/runner/trigger", async (req: Request, res: Response) => {
+    const bridgeAuth = requireBridgeAccess(req);
+    if (!bridgeAuth.ok) {
+      res.status(bridgeAuth.status).json({ ok: false, error: bridgeAuth.error });
+      return;
+    }
+
     const auth = resolveBridgeNotionToken(req);
     if (!auth.ok) {
       res.status(auth.status).json({ ok: false, error: auth.error });
@@ -1494,6 +1594,12 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
   });
 
   app.get("/sse", async (req: Request, res: Response) => {
+    const bridgeAuth = requireBridgeAccess(req);
+    if (!bridgeAuth.ok) {
+      res.status(bridgeAuth.status).json({ ok: false, error: bridgeAuth.error });
+      return;
+    }
+
     const auth = resolveBridgeNotionToken(req, {
       allowUnauthenticatedDiscovery: isTruthyEnv(process.env.AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE),
     });
@@ -1512,7 +1618,7 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
     };
 
     const server = createServer();
-    await runWithRuntimeContext({ notionToken: auth.notionToken }, async () => {
+    await runWithRuntimeContext({ notionToken: auth.notionToken, bridge: { remote: true } }, async () => {
       await server.connect(transport);
     });
   });
@@ -1531,7 +1637,7 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
     }
 
     const sessionNotionToken = sessionNotionTokens[sessionId];
-    await runWithRuntimeContext({ notionToken: sessionNotionToken }, async () => {
+    await runWithRuntimeContext({ notionToken: sessionNotionToken, bridge: { remote: true } }, async () => {
       await transport.handlePostMessage(req, res, req.body);
     });
   });

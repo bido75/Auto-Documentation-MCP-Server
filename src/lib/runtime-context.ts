@@ -3,6 +3,9 @@ import { getOptionalRuntimeConfig } from "../config.js";
 
 export type RuntimeContext = {
   notionToken?: string;
+  bridge?: {
+    remote?: boolean;
+  };
   provider?: {
     type?: string;
     endpoint?: string;
