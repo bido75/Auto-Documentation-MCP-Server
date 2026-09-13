@@ -242,6 +242,62 @@ Save the returned `evidenceEventId`.
 
 Save the returned `featureKey`, `featureName`, `audiences`, `entryTypes`, `confidenceScore`, `confidenceReasons`, and `generatedNarratives`.
 
+### 6.3a Backfill Existing Undocumented Features
+
+If you connected Auto-Doc after the application already existed, run the retrospective probe before packaging:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 31,
+  "method": "tools/call",
+  "params": {
+    "name": "probe_application",
+    "arguments": {
+      "repoPath": "C:/path/to/your/application"
+    }
+  }
+}
+```
+
+Pass the returned `inventory` into `generate_gap_report`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 32,
+  "method": "tools/call",
+  "params": {
+    "name": "generate_gap_report",
+    "arguments": {
+      "projectId": "<project-id>",
+      "inventory": { "schemaVersion": 1, "repoPath": "...", "generatedAt": "...", "fileCount": 0, "features": [] }
+    }
+  }
+}
+```
+
+Then pass the returned `gapReport` into `synthesize_missing_content`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 33,
+  "method": "tools/call",
+  "params": {
+    "name": "synthesize_missing_content",
+    "arguments": {
+      "projectId": "<project-id>",
+      "repoPath": "C:/path/to/your/application",
+      "gapReport": { "schemaVersion": 1, "projectId": "<project-id>", "generatedAt": "...", "totalDiscovered": 0, "documentedCount": 0, "missingCount": 0, "gaps": [] },
+      "maxFeatures": 10
+    }
+  }
+}
+```
+
+For release automation, `run_release_documentation_pipeline` can do this automatically when called with `probeBeforePackage: true`, or the runner can enable it with `AUTO_DOC_RUNNER_RELEASE_PROBE_BEFORE_PACKAGE=true`.
+
 ### 6.4 Upsert Feature Documentation
 
 Use the analysis output to create manual entries:

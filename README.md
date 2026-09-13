@@ -42,6 +42,8 @@ npm run dev
 - `AUTO_DOC_BRIDGE_API_KEY` for HTTP-SSE bridge access; required to open `/sse`, `/runner/status`, and `/runner/trigger`
 - `AUTO_DOC_RUNNER_PROJECT_ID` and `AUTO_DOC_RUNNER_REPO_PATH` to enable the continuous runner
 - `AUTO_DOC_RUNNER_TARGETS` to configure multiple runner targets in one JSON payload
+- `AUTO_DOC_RUNNER_RELEASE_PROBE_BEFORE_PACKAGE=true` makes release automation scan the repo for pre-existing undocumented features before packaging
+- `AUTO_DOC_RUNNER_RELEASE_PROBE_MAX_FEATURES` caps how many retrospective gaps a release automation run synthesizes at once
 - `SELF_DOC_PROJECT_ID` and `SELF_DOC_REPO_PATH` are separate runtime config values; they are not the runner source of truth
 - `STATE_ENCRYPTION_KEY` must be a unique high-entropy value in production, bridge mode, and runner mode
 - Project state defaults to `~/.auto-doc-mcp/state.json` so runner restarts resume the same project outside the current working directory
@@ -61,6 +63,17 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 Container default: HTTP bridge mode. The Docker image starts `node build/src/cli/index.js bridge`, exposes `/health`, and is intended for web, Bifrost, and tunnel deployments. Set `AUTO_DOC_BRIDGE_API_KEY` before opening MCP or runner sessions; non-loopback binds fail closed without a configured, non-placeholder key.
 
 Use stdio MCP locally with `npm run dev` or `node build/src/index.js`. Use continuous mode with `AUTO_DOC_RUNTIME_MODE=runner node build/src/index.js` or `node build/src/cli/index.js runner` after configuring runner targets.
+
+## Retrospective Probing
+
+For projects that existed before Auto-Doc was connected, use the probing tools to backfill missed manual coverage:
+
+1. `probe_application` scans an allowed repository root and returns a feature/config/API inventory.
+2. `generate_gap_report` compares that inventory with the project's documented feature keys.
+3. `synthesize_missing_content` captures probe evidence and upserts missing entries through the normal Notion/manual authoring flow.
+4. `capture_ocr_review` ingests Open Code Review style findings as documentation evidence.
+
+Release packaging can run this automatically by calling `run_release_documentation_pipeline` with `probeBeforePackage: true` and a `repoPath`, or by setting `AUTO_DOC_RUNNER_RELEASE_PROBE_BEFORE_PACKAGE=true` for runner release automation.
 
 ## VS Code MCP Development Integration
 

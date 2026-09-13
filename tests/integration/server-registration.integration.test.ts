@@ -28,5 +28,11 @@ describe("createServer tool registration", () => {
     expect(toolNames).toContain("analyze_documentation_candidate");
     expect(toolNames).toContain("upsert_feature_documentation");
     expect(toolNames).toContain("package_manual");
+    expect(toolNames).toContain("humanize_manual");
+    expect(toolNames).toContain("humanize_content");
+    expect(toolNames).toContain("probe_application");
+    expect(toolNames).toContain("generate_gap_report");
+    expect(toolNames).toContain("synthesize_missing_content");
+    expect(toolNames).toContain("capture_ocr_review");
   }, 15_000);
 });

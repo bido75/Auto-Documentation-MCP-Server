@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -529,11 +529,18 @@ describe("export and release tools", () => {
 
   it("runs release pipeline through trigger, changelog, package, PDF, sync, and help-center steps", async () => {
     const { stateDir, notion } = await setupProject();
+    await mkdir(join(stateDir, "src"), { recursive: true });
+    await writeFile(join(stateDir, "package.json"), JSON.stringify({ scripts: { start: "node build/src/index.js" } }, null, 2));
+    await writeFile(
+      join(stateDir, "src", "billing-api.ts"),
+      "export function billingExport() {}\nrouter.post('/api/billing/export', handler)\nconst bucket = process.env.BILLING_EXPORT_BUCKET;\n",
+    );
     const { registerRunReleaseDocumentationPipelineTool } = await import("../../src/tools/run-release-documentation-pipeline.js");
     const pipeline = await handlerFor(registerRunReleaseDocumentationPipelineTool, "run_release_documentation_pipeline");
 
     const result = parseTool<{
       trigger: { disposition: string; capture: { evidenceEventId: string } };
+      retrospectiveProbe: { enabled: boolean; missingCount: number; synthesizedCount: number; synthesizedFeatureKeys: string[] };
       changelog: { entryCount: number };
       package: { releasePageId: string };
       pdf: { outputPath: string };
@@ -545,6 +552,8 @@ describe("export and release tools", () => {
         releaseVersion: "2.0.0",
         repoPath: stateDir,
         mode: "last_commit",
+        probeBeforePackage: true,
+        probeMaxFeatures: 1,
         audience: "both",
         packageFormat: "markdown",
         pdfOutputPath: join(stateDir, "release.pdf"),
@@ -555,12 +564,17 @@ describe("export and release tools", () => {
 
     expect(result.trigger.disposition).toBe("documented");
     expect(result.trigger.capture.evidenceEventId).toMatch(/^evt_/);
+    expect(result.retrospectiveProbe.enabled).toBe(true);
+    expect(result.retrospectiveProbe.missingCount).toBeGreaterThan(0);
+    expect(result.retrospectiveProbe.synthesizedCount).toBe(1);
+    expect(result.retrospectiveProbe.synthesizedFeatureKeys).toContain("probe:api_endpoint:post-api-billing-export");
     expect(result.changelog.entryCount).toBeGreaterThanOrEqual(2);
     expect(result.package.releasePageId).toBeTruthy();
     expect(result.pdf.outputPath).toContain("release.pdf");
     expect(result.sync.outputPath).toContain("release.md");
     expect(result.helpCenter.articleCount).toBeGreaterThanOrEqual(1);
-    expect(Array.from(notion._pages.values()).filter((page) => page.parent.database_id === "events_db")).toHaveLength(1);
+    expect(Array.from(notion._pages.values()).filter((page) => page.parent.database_id === "events_db")).toHaveLength(2);
+    expect(Array.from(notion._pages.values()).some((page) => textFromTitle(page.properties["Entry Title"]) === "POST /api/billing/export User Guide")).toBe(true);
     const assembledManualPages = Array.from(notion._pages.values()).filter((page) => "page_id" in page.parent);
     expect(assembledManualPages.map((page) => textFromTitle(page.properties.title)).sort()).toEqual(["Admin Manual", "User Manual"]);
   }, 20_000);

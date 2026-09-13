@@ -3,6 +3,7 @@ import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { composeAssembledManualMarkdown, type ManualAssemblyEntry } from "../lib/manual-assembler.js";
 import { extractManualContentFromBlocks } from "../lib/manual-blocks.js";
+import { humanizeManualEntries } from "../lib/manual-humanizer.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { createNotionClient } from "../lib/notion-client.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
@@ -151,6 +152,7 @@ export function registerPackageManualTool(server: McpServer) {
       releaseVersion: z.string(),
       audience: z.enum(["user", "admin", "both"]),
       format: z.enum(["notion_page", "markdown"]),
+      humanize: z.boolean().default(true),
       traceId: z.string().optional(),
       manualEntryIds: z.array(z.string()).optional(),
       includedFeatureIds: z.array(z.string()).optional(),
@@ -185,7 +187,7 @@ export function registerPackageManualTool(server: McpServer) {
         stage: "start",
         traceId,
         message: "Packaging release manual",
-        data: { projectId: input.projectId, releaseVersion: input.releaseVersion, format: input.format, audience: input.audience },
+        data: { projectId: input.projectId, releaseVersion: input.releaseVersion, format: input.format, audience: input.audience, humanize: input.humanize },
       });
 
       try {
@@ -232,11 +234,14 @@ export function registerPackageManualTool(server: McpServer) {
             releasePageId,
           });
 
+        const humanized = input.humanize ? humanizeManualEntries(sourceEntries) : null;
+        const packableEntries = humanized?.entries ?? sourceEntries;
+
         const markdown = composeAssembledManualMarkdown({
           projectName: input.projectName ?? project.projectName,
           releaseVersion: input.releaseVersion,
           audience: input.audience,
-          entries: sourceEntries.map((entry): ManualAssemblyEntry => ({
+          entries: packableEntries.map((entry): ManualAssemblyEntry => ({
             id: entry.pageId || entry.title,
             title: entry.title,
             audience: entry.audience,
@@ -368,6 +373,7 @@ export function registerPackageManualTool(server: McpServer) {
             releaseVersion: input.releaseVersion,
             includedEntryCount: includedCount,
             excludedEntryCount: excludedCount,
+            humanizedEntryCount: humanized?.changedCount ?? 0,
             durationMs: Date.now() - startedAt,
           },
         });
@@ -387,6 +393,11 @@ export function registerPackageManualTool(server: McpServer) {
                   includedEntryCount: includedCount,
                   excludedEntryCount: excludedCount,
                   excludedReasons,
+                  humanize: {
+                    enabled: input.humanize,
+                    changedEntryCount: humanized?.changedCount ?? 0,
+                    metrics: humanized?.metrics,
+                  },
                   output,
                 },
                 null,

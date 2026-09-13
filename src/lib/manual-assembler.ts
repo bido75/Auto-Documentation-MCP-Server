@@ -1,4 +1,5 @@
 import { divider, heading1, heading2, paragraph } from "./notion-blocks.js";
+import { humanizeManualMarkdown } from "./manual-humanizer.js";
 import { redactSecrets } from "./redaction.js";
 import type { ManualFigure } from "../types.js";
 
@@ -105,7 +106,8 @@ function sortFeatureEntries(entries: ManualAssemblyEntry[]): ManualAssemblyEntry
 }
 
 function normalizeFeatureBody(entry: ManualAssemblyEntry, title: string): string {
-  const lines = entry.body.split(/\r?\n/);
+  const humanizedBody = humanizeManualMarkdown(entry.body).text.trimEnd();
+  const lines = humanizedBody.split(/\r?\n/);
   const normalized: string[] = [];
   let skippedTitle = false;
   for (const rawLine of lines) {

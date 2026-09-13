@@ -18,6 +18,8 @@ export interface ContinuousRunnerTarget {
   repoPath: string;
   mode?: "staged" | "last_commit" | "working_tree";
   releaseAutomation?: boolean;
+  releaseProbeBeforePackage?: boolean;
+  releaseProbeMaxFeatures?: number;
   releasePrUrl?: string;
   releaseAudience?: "user" | "admin" | "both";
   releasePackageFormat?: "notion_page" | "markdown";
@@ -57,6 +59,8 @@ type ReleasePipelineInput = {
   releaseVersion: string;
   repoPath: string;
   mode: "staged" | "last_commit" | "working_tree";
+  probeBeforePackage?: boolean;
+  probeMaxFeatures?: number;
   prUrl?: string;
   audience?: "user" | "admin" | "both";
   packageFormat?: "notion_page" | "markdown";
@@ -197,6 +201,8 @@ async function runReleasePipeline(input: ReleasePipelineInput): Promise<unknown>
       releaseVersion: input.releaseVersion,
       repoPath: input.repoPath,
       mode: input.mode,
+      probeBeforePackage: input.probeBeforePackage,
+      probeMaxFeatures: input.probeMaxFeatures,
       prUrl: input.prUrl,
       audience: input.audience,
       packageFormat: input.packageFormat,
@@ -513,6 +519,8 @@ export class ContinuousDocumentationRunner extends EventEmitter {
               releaseVersion,
               repoPath: target.repoPath,
               mode,
+              probeBeforePackage: target.releaseProbeBeforePackage,
+              probeMaxFeatures: target.releaseProbeMaxFeatures,
               prUrl: target.releasePrUrl,
               audience: target.releaseAudience,
               packageFormat: target.releasePackageFormat,

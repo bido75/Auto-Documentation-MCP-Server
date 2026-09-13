@@ -38,6 +38,8 @@ type RunnerTarget = {
   repoPath: string;
   mode?: "staged" | "last_commit" | "working_tree";
   releaseAutomation?: boolean;
+  releaseProbeBeforePackage?: boolean;
+  releaseProbeMaxFeatures?: number;
   releasePrUrl?: string;
   releaseAudience?: "user" | "admin" | "both";
   releasePackageFormat?: "notion_page" | "markdown";
@@ -57,6 +59,14 @@ function parseTarget(candidate: unknown, index: number): RunnerTarget {
   const mode = target.mode;
   const parsedMode = mode === undefined ? undefined : mode === "staged" || mode === "last_commit" || mode === "working_tree" ? mode : undefined;
   const releaseAutomation = target.releaseAutomation === undefined ? undefined : typeof target.releaseAutomation === "boolean" ? target.releaseAutomation : undefined;
+  const releaseProbeBeforePackage =
+    target.releaseProbeBeforePackage === undefined ? undefined : typeof target.releaseProbeBeforePackage === "boolean" ? target.releaseProbeBeforePackage : undefined;
+  const releaseProbeMaxFeatures =
+    target.releaseProbeMaxFeatures === undefined
+      ? undefined
+      : typeof target.releaseProbeMaxFeatures === "number" && Number.isInteger(target.releaseProbeMaxFeatures) && target.releaseProbeMaxFeatures >= 1 && target.releaseProbeMaxFeatures <= 50
+        ? target.releaseProbeMaxFeatures
+        : undefined;
   const releasePrUrl = typeof target.releasePrUrl === "string" ? target.releasePrUrl.trim() : undefined;
   const releaseAudience = target.releaseAudience === "user" || target.releaseAudience === "admin" || target.releaseAudience === "both" ? target.releaseAudience : undefined;
   const releasePackageFormat = target.releasePackageFormat === "notion_page" || target.releasePackageFormat === "markdown" ? target.releasePackageFormat : undefined;
@@ -65,6 +75,8 @@ function parseTarget(candidate: unknown, index: number): RunnerTarget {
   if (!repoPath) throw new Error(`AUTO_DOC_RUNNER_TARGETS[${index}].repoPath is required.`);
   if (mode !== undefined && parsedMode === undefined) throw new Error(`AUTO_DOC_RUNNER_TARGETS[${index}].mode must be staged, last_commit, or working_tree.`);
   if (target.releaseAutomation !== undefined && releaseAutomation === undefined) throw new Error(`AUTO_DOC_RUNNER_TARGETS[${index}].releaseAutomation must be a boolean.`);
+  if (target.releaseProbeBeforePackage !== undefined && releaseProbeBeforePackage === undefined) throw new Error(`AUTO_DOC_RUNNER_TARGETS[${index}].releaseProbeBeforePackage must be a boolean.`);
+  if (target.releaseProbeMaxFeatures !== undefined && releaseProbeMaxFeatures === undefined) throw new Error(`AUTO_DOC_RUNNER_TARGETS[${index}].releaseProbeMaxFeatures must be an integer from 1 to 50.`);
   if (target.releaseAudience !== undefined && releaseAudience === undefined) throw new Error(`AUTO_DOC_RUNNER_TARGETS[${index}].releaseAudience must be user, admin, or both.`);
   if (target.releasePackageFormat !== undefined && releasePackageFormat === undefined) throw new Error(`AUTO_DOC_RUNNER_TARGETS[${index}].releasePackageFormat must be notion_page or markdown.`);
   if (target.releasePrUrl !== undefined && !releasePrUrl) throw new Error(`AUTO_DOC_RUNNER_TARGETS[${index}].releasePrUrl must be a non-empty string when provided.`);
@@ -74,6 +86,8 @@ function parseTarget(candidate: unknown, index: number): RunnerTarget {
     repoPath,
     ...(parsedMode ? { mode: parsedMode } : {}),
     ...(releaseAutomation !== undefined ? { releaseAutomation } : {}),
+    ...(releaseProbeBeforePackage !== undefined ? { releaseProbeBeforePackage } : {}),
+    ...(releaseProbeMaxFeatures !== undefined ? { releaseProbeMaxFeatures } : {}),
     ...(releasePrUrl ? { releasePrUrl } : {}),
     ...(releaseAudience ? { releaseAudience } : {}),
     ...(releasePackageFormat ? { releasePackageFormat } : {}),
@@ -115,6 +129,12 @@ export function parseContinuousRunnerTargets(env = process.env): RunnerTarget[] 
   const mode = env.AUTO_DOC_RUNNER_MODE?.trim();
   const parsedMode = mode === undefined ? undefined : mode === "staged" || mode === "last_commit" || mode === "working_tree" ? mode : undefined;
   const releaseAutomation = parseBoolean(env.AUTO_DOC_RUNNER_RELEASE_AUTOMATION);
+  const releaseProbeBeforePackage = parseBoolean(env.AUTO_DOC_RUNNER_RELEASE_PROBE_BEFORE_PACKAGE);
+  const releaseProbeMaxFeaturesRaw = env.AUTO_DOC_RUNNER_RELEASE_PROBE_MAX_FEATURES?.trim();
+  const releaseProbeMaxFeatures =
+    releaseProbeMaxFeaturesRaw && Number.isInteger(Number(releaseProbeMaxFeaturesRaw)) && Number(releaseProbeMaxFeaturesRaw) >= 1 && Number(releaseProbeMaxFeaturesRaw) <= 50
+      ? Number(releaseProbeMaxFeaturesRaw)
+      : undefined;
   const releaseAudienceRaw = env.AUTO_DOC_RUNNER_RELEASE_AUDIENCE?.trim();
   const releaseAudience = releaseAudienceRaw === "user" || releaseAudienceRaw === "admin" || releaseAudienceRaw === "both" ? releaseAudienceRaw : undefined;
   const releasePackageFormatRaw = env.AUTO_DOC_RUNNER_RELEASE_PACKAGE_FORMAT?.trim();
@@ -135,6 +155,12 @@ export function parseContinuousRunnerTargets(env = process.env): RunnerTarget[] 
   if (env.AUTO_DOC_RUNNER_RELEASE_AUTOMATION !== undefined && releaseAutomation === undefined) {
     throw new Error("AUTO_DOC_RUNNER_RELEASE_AUTOMATION must be true or false.");
   }
+  if (env.AUTO_DOC_RUNNER_RELEASE_PROBE_BEFORE_PACKAGE !== undefined && releaseProbeBeforePackage === undefined) {
+    throw new Error("AUTO_DOC_RUNNER_RELEASE_PROBE_BEFORE_PACKAGE must be true or false.");
+  }
+  if (releaseProbeMaxFeaturesRaw && releaseProbeMaxFeatures === undefined) {
+    throw new Error("AUTO_DOC_RUNNER_RELEASE_PROBE_MAX_FEATURES must be an integer from 1 to 50.");
+  }
   if (releaseAudienceRaw && !releaseAudience) {
     throw new Error("AUTO_DOC_RUNNER_RELEASE_AUDIENCE must be user, admin, or both.");
   }
@@ -148,6 +174,8 @@ export function parseContinuousRunnerTargets(env = process.env): RunnerTarget[] 
       repoPath,
       ...(parsedMode ? { mode: parsedMode } : {}),
       ...(releaseAutomation !== undefined ? { releaseAutomation } : {}),
+      ...(releaseProbeBeforePackage !== undefined ? { releaseProbeBeforePackage } : {}),
+      ...(releaseProbeMaxFeatures !== undefined ? { releaseProbeMaxFeatures } : {}),
       ...(releasePrUrl ? { releasePrUrl } : {}),
       ...(releaseAudience ? { releaseAudience } : {}),
       ...(releasePackageFormat ? { releasePackageFormat } : {}),

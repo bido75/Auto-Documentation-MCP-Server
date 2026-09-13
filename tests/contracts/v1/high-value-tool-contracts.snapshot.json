@@ -314,6 +314,7 @@
         "excludedEntryCount",
         "excludedReasons",
         "format",
+        "humanize",
         "includedEntryCount",
         "output",
         "projectId",
@@ -332,6 +333,17 @@
         },
         "format": {
           "type": "string"
+        },
+        "humanize": {
+          "type": "object",
+          "required": [
+            "changedEntryCount"
+          ],
+          "properties": {
+            "changedEntryCount": {
+              "type": "number"
+            }
+          }
         },
         "includedEntryCount": {
           "type": "number"
