@@ -19,6 +19,7 @@ type ComposeService = {
   profiles?: string[];
   command?: string[];
   environment?: Record<string, string>;
+  ports?: string[];
 };
 
 type ComposeFile = {
@@ -95,6 +96,14 @@ describe("fix-deployment-config-coherence", () => {
       SELF_DOC_PROJECT_ID: "${SELF_DOC_PROJECT_ID:-}",
       SELF_DOC_REPO_PATH: "${SELF_DOC_REPO_PATH:-}",
     });
+  });
+
+  it("bifrost gateway avoids the common localhost 8080 host-port collision", async () => {
+    const compose = await composeFile();
+    const bifrost = compose.services["bifrost-gateway"];
+    expect(bifrost).toBeDefined();
+    expect(bifrost.ports).toContain("127.0.0.1:8081:8080");
+    expect(bifrost.ports).not.toContain("8080:8080");
   });
 
   it("autonomous orchestrator is wired through the capture analyze upsert publish pipeline", async () => {
