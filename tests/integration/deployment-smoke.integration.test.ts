@@ -5,6 +5,7 @@
 import { readFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { AddressInfo } from "node:net";
+import { parse } from "yaml";
 import { afterEach, describe, expect, it } from "vitest";
 import { createHttpBridgeApp } from "../../src/http-bridge/server.js";
 
@@ -12,6 +13,20 @@ let server: Server | null = null;
 
 async function text(path: string): Promise<string> {
   return readFile(path, "utf8");
+}
+
+type ComposeService = {
+  profiles?: string[];
+  command?: string[];
+  environment?: Record<string, string>;
+};
+
+type ComposeFile = {
+  services: Record<string, ComposeService>;
+};
+
+async function composeFile(): Promise<ComposeFile> {
+  return parse(await text("docker-compose.yml")) as ComposeFile;
 }
 
 afterEach(async () => {
@@ -47,6 +62,48 @@ describe("fix-deployment-config-coherence", () => {
     const runner = await text("src/runner/index.ts");
     expect(runner).toContain('process.once("SIGTERM", stopRunner)');
     expect(runner).toContain("runner.stop()");
+  });
+
+  it("self-hosted bridge passes provider and runner status environment through to the app", async () => {
+    const compose = await composeFile();
+    const bridge = compose.services["notion-auto-doc"];
+    expect(bridge).toBeDefined();
+    expect(bridge.command).toEqual(["node", "build/src/cli/index.js", "bridge"]);
+    expect(bridge.environment).toMatchObject({
+      AUTO_DOC_RUNTIME_MODE: "bridge",
+      BIFROST_VIRTUAL_KEY: "${BIFROST_VIRTUAL_KEY:-}",
+      AUTO_DOC_RUNNER_PROJECT_ID: "${AUTO_DOC_RUNNER_PROJECT_ID:-}",
+      AUTO_DOC_RUNNER_REPO_PATH: "${AUTO_DOC_RUNNER_REPO_PATH:-}",
+      AUTO_DOC_RUNNER_TARGETS: "${AUTO_DOC_RUNNER_TARGETS:-}",
+      SELF_DOC_PROJECT_ID: "${SELF_DOC_PROJECT_ID:-}",
+      SELF_DOC_REPO_PATH: "${SELF_DOC_REPO_PATH:-}",
+    });
+  });
+
+  it("self-hosted runner has a real autonomous entrypoint and receives the same target/provider config", async () => {
+    const compose = await composeFile();
+    const runner = compose.services["notion-auto-doc-runner"];
+    expect(runner).toBeDefined();
+    expect(runner.profiles).toEqual(["runner"]);
+    expect(runner.command).toEqual(["node", "build/src/index.js", "runner"]);
+    expect(runner.environment).toMatchObject({
+      AUTO_DOC_RUNTIME_MODE: "runner",
+      BIFROST_VIRTUAL_KEY: "${BIFROST_VIRTUAL_KEY:-}",
+      AUTO_DOC_RUNNER_PROJECT_ID: "${AUTO_DOC_RUNNER_PROJECT_ID:-}",
+      AUTO_DOC_RUNNER_REPO_PATH: "${AUTO_DOC_RUNNER_REPO_PATH:-}",
+      AUTO_DOC_RUNNER_TARGETS: "${AUTO_DOC_RUNNER_TARGETS:-}",
+      SELF_DOC_PROJECT_ID: "${SELF_DOC_PROJECT_ID:-}",
+      SELF_DOC_REPO_PATH: "${SELF_DOC_REPO_PATH:-}",
+    });
+  });
+
+  it("autonomous orchestrator is wired through the capture analyze upsert publish pipeline", async () => {
+    const orchestrator = await text("src/orchestrator/auto-doc-orchestrator.ts");
+    expect(orchestrator).toContain("registerCaptureDevelopmentEventTool(server)");
+    expect(orchestrator).toContain("registerAnalyzeDocumentationCandidateTool(server)");
+    expect(orchestrator).toContain("registerUpsertFeatureDocumentationTool(server)");
+    expect(orchestrator).toContain("registerPublishOrQueueReviewTool(server)");
+    expect(orchestrator).not.toContain("return { ok: true }");
   });
 
   it("npm run lint script exists and is wired into CI", async () => {
