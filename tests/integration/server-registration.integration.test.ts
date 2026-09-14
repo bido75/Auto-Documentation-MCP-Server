@@ -34,5 +34,9 @@ describe("createServer tool registration", () => {
     expect(toolNames).toContain("generate_gap_report");
     expect(toolNames).toContain("synthesize_missing_content");
     expect(toolNames).toContain("capture_ocr_review");
+    expect(toolNames).toContain("get_documentation_health");
+    expect(toolNames).toContain("configure_webhook");
+    expect(toolNames).toContain("trigger_webhook_test");
+    expect(toolNames).toHaveLength(36);
   }, 15_000);
 });
