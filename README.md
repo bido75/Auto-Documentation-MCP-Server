@@ -1,4 +1,24 @@
-# Auto-Documentation MCP Server
+# Auto-Doc MCP
+
+[![npm version](https://badge.fury.io/js/auto-doc-mcp.svg)](https://www.npmjs.com/package/auto-doc-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-blue.svg)](https://modelcontextprotocol.io)
+
+Automatically generates user and admin manuals in Notion as you build.
+By ship time, the manual is ready.
+
+## Install
+
+```bash
+npx auto-doc-mcp init
+```
+
+[Read the Quickstart](QUICKSTART.md) | [Self-host in 5 minutes](docs/SELF-HOSTING.md) | [Browse all 36 tools](docs/TOOLS.md)
+
+## What It Does
+
+Auto-Doc MCP captures development evidence from commits, pull requests, CI/release events, screenshots, codebase probes, and AI-session summaries.
+It decides whether a change is manual-worthy, writes grounded documentation into Notion, humanizes the result, and packages release-ready manuals as PDF, Markdown, and help-center JSON.
 
 Production-ready TypeScript MCP server that captures development signals and continuously builds user/admin documentation in Notion.
 

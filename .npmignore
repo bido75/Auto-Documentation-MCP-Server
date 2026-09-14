@@ -1,0 +1,43 @@
+# Development
+src/
+tests/
+functional-tests/
+.github/
+*.test.ts
+*.spec.ts
+vitest.config.ts
+tsconfig.json
+
+# Deployment and infrastructure
+docker-compose.yml
+Dockerfile
+nginx/
+cloudflared/
+bifrost-config.json
+bifrost-data/
+bifrost-assets/
+packages/
+
+# Secrets and local config
+.env
+.env.local
+*.env
+.auto-doc-mcp.json
+.auto-doc/
+.npm-cache/
+*.state.json
+*.dpapi
+
+# Development artifacts
+*.tmp
+coverage/
+*.log
+vitest-report/
+functional-tests/artifacts/
+
+# OS and editor
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+.idea/

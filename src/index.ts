@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { logToolEvent, resolveTraceId } from "./lib/logger.js";

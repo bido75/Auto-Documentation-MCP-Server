@@ -14,7 +14,7 @@ import { registerUpsertFeatureDocumentationTool } from "./tools/upsert-feature-d
 
 export const SERVER_METADATA = {
   name: "auto-docs-notion-mcp",
-  version: "0.1.0",
+  version: "0.2.1",
 } as const;
 
 export const REGISTERED_TOOL_NAMES = [

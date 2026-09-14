@@ -7,29 +7,37 @@ function readWorkspaceFile(path: string): string {
 }
 
 describe("cold-read remediation", () => {
-  it("ships a human-authored quickstart that takes a new user from clone to first documented event", () => {
+  it("ships an install-first quickstart that takes a new user from npx init to first documented event", () => {
     expect(existsSync(join(process.cwd(), "QUICKSTART.md"))).toBe(true);
     const quickstart = readWorkspaceFile("QUICKSTART.md");
 
-    expect(quickstart).toContain("Node.js 20");
+    expect(quickstart).toContain("Node.js 18");
     expect(quickstart).toContain("Create a Notion integration");
     expect(quickstart).toContain("Share the page with the integration");
-    expect(quickstart).toContain("NOTION_PARENT_PAGE_ID");
-    expect(quickstart).toContain("STATE_ENCRYPTION_KEY");
-    expect(quickstart).toContain("POSTGRES_PASSWORD");
-    expect(quickstart).toContain("AI_PROVIDER_TYPE=local-ollama");
-    expect(quickstart).toContain("AI_ENDPOINT=http://ollama:11434");
-    expect(quickstart).toContain("AI_MODEL_NAME=llama3.1:8b-instruct-q4_K_M");
-    expect(quickstart).toContain("OPENROUTER_API_KEY=");
-    expect(quickstart).toContain("docker compose --profile self-hosted up -d --build");
-    expect(quickstart).toContain("curl http://localhost:3000/health");
-    expect(quickstart).toContain("initialize_project_manual");
+    expect(quickstart).toContain("npx auto-doc-mcp init");
+    expect(quickstart).toContain('git commit -m "feat: add user authentication"');
+    expect(quickstart).toContain("Within about 45 seconds");
     expect(quickstart).toContain("capture_development_event");
     expect(quickstart).toContain("analyze_documentation_candidate");
     expect(quickstart).toContain("upsert_feature_documentation");
-    expect(quickstart).toContain("publish_or_queue_review");
+    expect(quickstart).toContain("get_documentation_health");
     expect(quickstart).toContain("package_manual");
-    expect(quickstart).toContain('"jsonrpc": "2.0"');
+    expect(quickstart).toContain("export_manual_pdf");
+    expect(quickstart).toContain("configure_webhook");
+    expect(quickstart).toContain("probe_application");
+    expect(quickstart).not.toContain('"jsonrpc": "2.0"');
+  });
+
+  it("keeps infrastructure setup in the linked self-hosting guide", () => {
+    expect(existsSync(join(process.cwd(), "docs", "SELF-HOSTING.md"))).toBe(true);
+    const selfHosting = readWorkspaceFile("docs/SELF-HOSTING.md");
+
+    expect(selfHosting).toContain("Docker and Docker Compose");
+    expect(selfHosting).toContain("NOTION_TOKEN");
+    expect(selfHosting).toContain("STATE_ENCRYPTION_KEY");
+    expect(selfHosting).toContain("AUTO_DOC_BRIDGE_API_KEY");
+    expect(selfHosting).toContain("docker compose --profile self-hosted up -d --build");
+    expect(selfHosting).toContain("curl http://localhost:3000/health");
   });
 
   it("does not ship internal Langflow endpoints, embedded keys, or unobtainable Langflow requirements in user-facing config", () => {

@@ -1,20 +1,58 @@
 {
-  "name": "auto-docs-notion-mcp",
-  "version": "0.1.0",
+  "name": "auto-doc-mcp",
+  "version": "0.2.1",
+  "description": "Autonomous documentation generation MCP server that writes living user and admin manuals in Notion as features are completed.",
   "type": "module",
-  "private": true,
+  "license": "MIT",
+  "author": "bido75",
+  "homepage": "https://github.com/bido75/Auto-Documentation-MCP-Server#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bido75/Auto-Documentation-MCP-Server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bido75/Auto-Documentation-MCP-Server/issues"
+  },
+  "keywords": [
+    "mcp",
+    "documentation",
+    "notion",
+    "ai",
+    "developer-tools",
+    "cursor",
+    "vscode",
+    "claude",
+    "automatic-documentation"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "main": "./build/src/index.js",
+  "types": "./build/src/index.d.ts",
+  "files": [
+    "build/",
+    "README.md",
+    "QUICKSTART.md",
+    "LICENSE",
+    "docs/SELF-HOSTING.md",
+    "docs/TOOLS.md",
+    "docs/CONFIGURATION.md"
+  ],
   "bin": {
-    "auto-docs-notion-mcp": "./build/src/index.js",
-    "auto-doc-mcp": "./build/src/cli/index.js"
+    "auto-docs-notion-mcp": "build/src/index.js",
+    "auto-doc-mcp": "build/src/cli/index.js"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsc",
+    "clean": "node -e \"require('node:fs').rmSync('build',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc",
     "lint": "tsc --noEmit",
     "test": "vitest run",
     "test:live-notion": "vitest run tests/integration/live-notion.integration.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run build && npm test",
+    "postpublish": "node -e \"const p=require('./package.json'); console.log('Published '+p.name+'@'+p.version)\"",
     "start": "node build/src/index.js",
     "cli": "node build/src/cli/index.js",
     "init": "node build/src/cli/index.js init",
