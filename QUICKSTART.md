@@ -12,6 +12,35 @@ Auto-Doc MCP sits quietly in your AI coding environment and writes user and admi
 
 For a local server, use [Self-Hosting](docs/SELF-HOSTING.md). For a hosted deployment, use the server URL your team provides.
 
+## Pricing
+
+Core tools are free. Self-host the server, bring your own Notion token and AI provider key, and run the basic documentation pipeline without a license.
+
+Full advanced feature set: $3/month maintenance license.
+
+| Feature | Free | Licensed |
+| --- | --- | --- |
+| initialize_project_manual | Yes | Yes |
+| capture_development_event | Yes | Yes |
+| get_git_diff_summary | Yes | Yes |
+| get_documentation_status | Yes | Yes |
+| configure_ai_provider | Yes | Yes |
+| AI-backed analysis | No | Yes |
+| probe_application and gap reports | No | Yes |
+| synthesize_missing_content | No | Yes |
+| humanize_manual and humanize_content | No | Yes |
+| documentation health score | No | Yes |
+| webhooks | No | Yes |
+| package and PDF export | No | Yes |
+
+You bring your own:
+
+- Notion integration token
+- AI provider key for OpenRouter, Anthropic, Bifrost, or another supported endpoint
+- Optional local Ollama endpoint
+
+Auto-Doc charges only for maintenance and ongoing improvements. Your API keys and inference costs stay with your own providers.
+
 ## Before You Run Init
 
 1. Create a Notion integration at [notion.so/my-integrations](https://www.notion.so/my-integrations).

@@ -151,6 +151,46 @@ async function writeProjectConfig(input: {
   await appendGitignore(input.cwd, ".auto-doc-mcp.json");
 }
 
+async function appendProjectEnvValue(cwd: string, key: string, value: string): Promise<void> {
+  const envPath = path.join(cwd, ".env");
+  const existing = await fs.readFile(envPath, "utf8").catch(() => "");
+  const lines = existing.split(/\r?\n/).filter((line) => !line.startsWith(`${key}=`));
+  lines.push(`${key}=${value}`);
+  await fs.writeFile(envPath, `${lines.filter(Boolean).join("\n")}\n`, "utf8");
+  await appendGitignore(cwd, ".env");
+}
+
+async function collectLicenseKey(input: {
+  cwd: string;
+  rl: readline.Interface;
+  assumeYes: boolean;
+}): Promise<boolean> {
+  console.error("\nLicense");
+  console.error("Core documentation tools are free.");
+  console.error("Advanced tools such as AI-backed analysis, probing, humanizer, webhooks, packaging, and PDF export require a maintenance license.");
+  console.error("You bring your own Notion token and AI provider key.\n");
+
+  if (input.assumeYes) {
+    console.error("License key skipped in --yes mode. Add AUTO_DOC_LICENSE_KEY to .env later for advanced tools.");
+    return false;
+  }
+
+  const licenseKey = (await input.rl.question("License key (press Enter to skip): ")).trim();
+  if (!licenseKey) {
+    console.error("Skipped - core tools will work without a license.");
+    return false;
+  }
+
+  if (licenseKey.split(".").length !== 3) {
+    console.error("License key format looks wrong. Add it later as AUTO_DOC_LICENSE_KEY in .env.");
+    return false;
+  }
+
+  await appendProjectEnvValue(input.cwd, "AUTO_DOC_LICENSE_KEY", licenseKey);
+  console.error("License key saved to .env.");
+  return true;
+}
+
 export async function runInit(argv: string[] = [], options: InitOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
   const githubActions = options.githubActions ?? (argv.includes("--github-actions") || argv.includes("--add-github-actions"));
@@ -189,6 +229,7 @@ export async function runInit(argv: string[] = [], options: InitOptions = {}): P
     if (shouldWriteGithubActions) {
       workflowPath = await writeGithubActionsWorkflow({ cwd, serverUrl, projectId });
     }
+    const licenseConfigured = await collectLicenseKey({ cwd, rl, assumeYes });
 
     await writeProjectConfig({
       cwd,
@@ -207,6 +248,7 @@ export async function runInit(argv: string[] = [], options: InitOptions = {}): P
       console.error(`GitHub Actions workflow: ${workflowPath}`);
       console.error("Add AUTO_DOC_MCP_URL and AUTO_DOC_BRIDGE_API_KEY as GitHub repository secrets before relying on CI capture.");
     }
+    console.error(`License: ${licenseConfigured ? "configured" : "core tools only"}`);
     console.error(`Host: ${os.hostname()}`);
   } finally {
     rl.close();

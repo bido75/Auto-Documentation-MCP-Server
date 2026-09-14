@@ -1,6 +1,6 @@
 {
   "name": "auto-doc-mcp",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Autonomous documentation generation MCP server that writes living user and admin manuals in Notion as features are completed.",
   "type": "module",
   "license": "MIT",

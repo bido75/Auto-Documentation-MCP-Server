@@ -16,6 +16,8 @@ import { createServer, REGISTERED_TOOL_NAMES, SERVER_METADATA } from "../server.
 import { executeAutonomousDocumentationTrigger, type AutonomousTriggerInput } from "../orchestrator/auto-doc-orchestrator.js";
 import { parseContinuousRunnerTargets } from "../runner/index.js";
 import { buildCandidate, preflightProviderTiers, type ProviderTierPreflightResult } from "../providers/factory.js";
+import { logStartupLicenseStatus } from "../lib/license-gate.js";
+import { handleLemonsqueezyWebhook } from "./webhooks/lemonsqueezy.js";
 
 const DEFAULT_PORT = 3741;
 const DEFAULT_WEBHOOK_RATE_LIMIT_PER_MINUTE = 60;
@@ -1431,6 +1433,10 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
     }
   });
 
+  app.post("/webhooks/lemonsqueezy", express.raw({ type: "application/json", limit: "1mb" }), async (req: Request, res: Response) => {
+    await handleLemonsqueezyWebhook(req, res);
+  });
+
   app.use(express.json({ limit: "1mb" }));
 
   app.get("/health", (_req, res) => {
@@ -1455,6 +1461,7 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
         messages: "/messages",
         githubWebhook: "/webhooks/github",
         aiSessionWebhook: "/webhooks/ai-session",
+        lemonsqueezyWebhook: "/webhooks/lemonsqueezy",
         runnerStatus: "/runner/status",
         runnerTrigger: "/runner/trigger",
         startupPreflight: "/startup/preflight",
@@ -1653,6 +1660,7 @@ export async function startHttpBridge(options?: HttpBridgeOptions): Promise<void
     app.listen(port, host, () => {
       console.error(`Auto-Doc MCP HTTP bridge running on http://${host}:${port}`);
       console.error(`Connect web tools to http://${host}:${port}/sse`);
+      logStartupLicenseStatus();
       void buildStartupPreflightSummary(host, port)
         .then((summary) => {
           logToolEvent({

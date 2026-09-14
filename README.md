@@ -20,6 +20,14 @@ npx auto-doc-mcp init
 Auto-Doc MCP captures development evidence from commits, pull requests, CI/release events, screenshots, codebase probes, and AI-session summaries.
 It decides whether a change is manual-worthy, writes grounded documentation into Notion, humanizes the result, and packages release-ready manuals as PDF, Markdown, and help-center JSON.
 
+## Pricing Model
+
+Auto-Doc MCP is MIT licensed and self-hosted. You bring your own Notion integration token and AI provider key, so your data and inference costs stay under your control.
+
+- Free: core tools for project initialization, event capture, git summaries, provider setup, and status checks.
+- Licensed: $3/month maintenance license for AI-backed analysis, probing, synthesis, humanizer, health score, webhooks, package/export, and release automation.
+- Offline validation: the server validates signed license JWTs locally. It does not need to phone home during normal tool use.
+
 Production-ready TypeScript MCP server that captures development signals and continuously builds user/admin documentation in Notion.
 
 The local bridge uses HTTP-SSE transport:
@@ -59,6 +67,8 @@ npm run dev
 - `NOTION_PARENT_PAGE_ID` for live integration tests
 - `RUN_LIVE_NOTION_TESTS=true` to enable env-gated live tests
 - `BIFROST_VIRTUAL_KEY` for Bifrost-backed AI calls when the provider is `bifrost`
+- `AUTO_DOC_LICENSE_KEY` enables the licensed advanced feature set
+- `AUTO_DOC_LICENSE_PUBLIC_KEY` or `AUTO_DOC_LICENSE_PUBLIC_KEY_FILE` provides the public key used for offline license validation
 - `AUTO_DOC_BRIDGE_API_KEY` for HTTP-SSE bridge access; required to open `/sse`, `/runner/status`, and `/runner/trigger`
 - `AUTO_DOC_RUNNER_PROJECT_ID` and `AUTO_DOC_RUNNER_REPO_PATH` to enable the continuous runner
 - `AUTO_DOC_RUNNER_TARGETS` to configure multiple runner targets in one JSON payload

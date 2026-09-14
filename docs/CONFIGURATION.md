@@ -4,8 +4,18 @@ This is the short reference for production operators.
 
 ## Required
 
-- `NOTION_TOKEN`: Notion integration token. New Notion tokens may use the `ntn_` prefix.
+- `NOTION_TOKEN`: Notion integration token.
 - `STATE_ENCRYPTION_KEY`: 64 hex characters or similarly high-entropy secret for encrypted local state.
+
+## License
+
+Core tools work without a license. Advanced tools require a signed maintenance license.
+
+- `AUTO_DOC_LICENSE_KEY`: Signed license JWT.
+- `AUTO_DOC_LICENSE_PUBLIC_KEY`: Public key for offline JWT validation. Use `\n` escapes for multiline PEM values.
+- `AUTO_DOC_LICENSE_PUBLIC_KEY_FILE`: Alternative path to the public PEM file.
+- `LEMONSQUEEZY_WEBHOOK_SECRET`: Server-side webhook secret for verified Lemon Squeezy events.
+- `AUTO_DOC_LICENSE_PRIVATE_KEY_PATH`: Server-side private key path for license issuance. Never commit the private key.
 
 ## HTTP Bridge
 
@@ -38,7 +48,8 @@ Leave `AUTO_DOC_STATE_FILE` unset for normal deployments so restarts resume from
 - `AI_API_KEY`: Provider credential, if required.
 - `AI_MODEL_NAME`: Primary model.
 - `AI_TIMEOUT_MS`: Request timeout.
-- `AI_CLOUD_FALLBACK_MODEL`: Ordered cloud fallback model list when configured.
+- `AI_CLOUD_FALLBACK_MODELS`: Ordered cloud fallback model list when configured.
+- `AI_CLOUD_FALLBACK_MODEL`: Legacy single-model fallback alias.
 - `OPENROUTER_ENDPOINT`: OpenRouter-compatible endpoint.
 - `OPENROUTER_API_KEY`: OpenRouter key.
 - `BIFROST_VIRTUAL_KEY`: Bifrost virtual key.

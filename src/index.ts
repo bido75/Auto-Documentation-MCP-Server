@@ -6,6 +6,7 @@ import { createServer } from "./server.js";
 import { runContinuousDocumentationRunner } from "./runner/index.js";
 import { resolveToken } from "./installer/token-store.js";
 import { runPostCommitTrigger } from "./cli/post-commit.js";
+import { logStartupLicenseStatus } from "./lib/license-gate.js";
 
 function resolveRuntimeMode(argv: string[], env: NodeJS.ProcessEnv): "mcp" | "runner" | "post-commit" {
 	const explicitArg = argv[2]?.trim().toLowerCase();
@@ -32,6 +33,7 @@ export async function runApplication(argv = process.argv, env = process.env): Pr
 	}
 
 	const mode = resolveRuntimeMode(argv, env);
+	logStartupLicenseStatus(env);
 
 	if (mode === "runner") {
 		await runContinuousDocumentationRunner(env);

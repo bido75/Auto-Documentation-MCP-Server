@@ -11,10 +11,11 @@ import { registerPackageManualTool } from "./tools/package-manual.js";
 import { registerPublishOrQueueReviewTool } from "./tools/publish-or-queue-review.js";
 import { registerExtraTools } from "./tools/extra-tools.js";
 import { registerUpsertFeatureDocumentationTool } from "./tools/upsert-feature-documentation.js";
+import { checkLicenseGate } from "./lib/license-gate.js";
 
 export const SERVER_METADATA = {
   name: "auto-docs-notion-mcp",
-  version: "0.2.1",
+  version: "0.3.0",
 } as const;
 
 export const REGISTERED_TOOL_NAMES = [
@@ -56,24 +57,59 @@ export const REGISTERED_TOOL_NAMES = [
   "trigger_webhook_test",
 ] as const;
 
+function createLicenseGatedServer(server: McpServer): McpServer {
+  const originalTool = server.tool.bind(server);
+  const gatedServer = Object.create(server) as McpServer;
+
+  gatedServer.tool = ((name: string, ...rest: unknown[]) => {
+    let handlerIndex = -1;
+    for (let index = rest.length - 1; index >= 0; index -= 1) {
+      if (typeof rest[index] === "function") {
+        handlerIndex = index;
+        break;
+      }
+    }
+    if (handlerIndex < 0) {
+      return Reflect.apply(originalTool, server, [name, ...rest]) as ReturnType<McpServer["tool"]>;
+    }
+
+    const originalHandler = rest[handlerIndex] as (...args: unknown[]) => unknown;
+    const wrappedHandler = async (...args: unknown[]) => {
+      const gate = checkLicenseGate(name);
+      if (!gate.allowed) {
+        return gate.response;
+      }
+
+      return Reflect.apply(originalHandler, undefined, args);
+    };
+    const wrappedRest = [...rest];
+    wrappedRest[handlerIndex] = wrappedHandler;
+
+    return Reflect.apply(originalTool, server, [name, ...wrappedRest]) as ReturnType<McpServer["tool"]>;
+  }) as McpServer["tool"];
+
+  return gatedServer;
+}
+
 export function createServer() {
   const server = new McpServer({
     name: SERVER_METADATA.name,
     version: SERVER_METADATA.version,
   });
+  const toolServer = createLicenseGatedServer(server);
 
-  registerInitializeProjectManualTool(server);
-  registerCaptureDevelopmentEventTool(server);
-  registerAnalyzeDocumentationCandidateTool(server);
-  registerUpsertFeatureDocumentationTool(server);
-  registerPublishOrQueueReviewTool(server);
-  registerPackageManualTool(server);
-  registerGetDocumentationStatusTool(server);
-  registerGetGitDiffSummaryTool(server);
-  registerAttachVisualEvidenceTool(server);
-  registerCaptureFeatureScreenshotTool(server);
-  registerExportManualMarkdownTool(server);
-  registerExtraTools(server);
+  registerInitializeProjectManualTool(toolServer);
+  registerCaptureDevelopmentEventTool(toolServer);
+  registerAnalyzeDocumentationCandidateTool(toolServer);
+  registerUpsertFeatureDocumentationTool(toolServer);
+  registerPublishOrQueueReviewTool(toolServer);
+  registerPackageManualTool(toolServer);
+  registerGetDocumentationStatusTool(toolServer);
+  registerGetGitDiffSummaryTool(toolServer);
+  registerAttachVisualEvidenceTool(toolServer);
+  registerCaptureFeatureScreenshotTool(toolServer);
+  registerExportManualMarkdownTool(toolServer);
+  registerExtraTools(toolServer);
 
   return server;
 }
