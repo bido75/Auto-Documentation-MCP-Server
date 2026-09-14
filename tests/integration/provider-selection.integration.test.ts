@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,6 +10,24 @@ import { StateStore } from "../../src/lib/state-store.js";
 import { buildCandidate, resetProvider } from "../../src/providers/factory.js";
 import { DeterministicProvider } from "../../src/providers/deterministic.js";
 import { LMStudioProvider } from "../../src/providers/lmstudio.js";
+
+function checkKeychainAvailable(): boolean {
+  if (process.platform !== "win32") {
+    return true;
+  }
+
+  try {
+    execFileSync("powershell.exe", ["-NoProfile", "-Command", "Import-Module Microsoft.PowerShell.Security"], {
+      stdio: "pipe",
+      timeout: 3_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const canUseKeychain = checkKeychainAvailable();
 
 type ToolResult = { content: Array<{ type: string; text: string }> };
 type ToolHandler = (input: unknown) => Promise<ToolResult>;
@@ -144,7 +163,7 @@ afterEach(() => {
 });
 
 describe("prove-real-provider-selection", () => {
-  it("configure_ai_provider changes the concrete provider used by the real factory and analyzer", async () => {
+  it.skipIf(!canUseKeychain)("configure_ai_provider changes the concrete provider used by the real factory and analyzer", async () => {
     await createAnalyzeFixture();
     const providerServer = await startOpenAiServer();
     process.env.AUTO_DOC_PROVIDER_ALLOW_LOCAL_ENDPOINTS = "true";
@@ -182,7 +201,7 @@ describe("prove-real-provider-selection", () => {
     }
   });
 
-  it("provider failure still falls back to deterministic analysis without mocking factory.ts", async () => {
+  it.skipIf(!canUseKeychain)("provider failure still falls back to deterministic analysis without mocking factory.ts", async () => {
     await createAnalyzeFixture();
     process.env.AUTO_DOC_PROVIDER_ALLOW_LOCAL_ENDPOINTS = "true";
     await runWithRuntimeContext({}, async () => {
