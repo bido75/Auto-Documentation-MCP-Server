@@ -25,6 +25,7 @@ export const REGISTERED_TOOL_NAMES = [
   "publish_or_queue_review",
   "package_manual",
   "get_documentation_status",
+  "get_documentation_health",
   "get_git_diff_summary",
   "get_runner_failure_triage_metadata",
   "get_runner_health_summary",
@@ -42,6 +43,7 @@ export const REGISTERED_TOOL_NAMES = [
   "capture_feature_screenshot",
   "assemble_manual",
   "configure_ai_provider",
+  "configure_webhook",
   "discover_project_from_notion",
   "export_manual_markdown",
   "export_manual_pdf",
@@ -51,6 +53,7 @@ export const REGISTERED_TOOL_NAMES = [
   "generate_release_changelog",
   "run_release_documentation_pipeline",
   "sync_manual_to_local_docs",
+  "trigger_webhook_test",
 ] as const;
 
 export function createServer() {

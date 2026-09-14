@@ -4,7 +4,8 @@
   "type": "module",
   "private": true,
   "bin": {
-    "auto-docs-notion-mcp": "./build/src/index.js"
+    "auto-docs-notion-mcp": "./build/src/index.js",
+    "auto-doc-mcp": "./build/src/cli/index.js"
   },
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -16,6 +17,7 @@
     "typecheck": "tsc --noEmit",
     "start": "node build/src/index.js",
     "cli": "node build/src/cli/index.js",
+    "init": "node build/src/cli/index.js init",
     "prompts:sync": "node scripts/sync-prompt-repo.mjs",
     "prompts:sync:dry-run": "node scripts/sync-prompt-repo.mjs --dry-run",
     "failover:smoke": "node scripts/forced-cloud-failover-smoke.mjs"

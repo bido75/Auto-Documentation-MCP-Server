@@ -6,6 +6,7 @@ import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import { getStateStore } from "../lib/state-store.js";
+import { sendWebhookNotification } from "../lib/webhook-notifier.js";
 import { decidePublishingStatus } from "../notion/manual-entry.js";
 
 function normalizePublishingMode(mode: "conservative" | "balanced" | "fully_automatic") {
@@ -93,6 +94,25 @@ export function registerPublishOrQueueReviewTool(server: McpServer) {
             operationName: "pages.update",
             payload: manualEntryPayload,
           });
+        }
+
+        if (status.status === "Needs Review") {
+          const webhooks = await store.listWebhookConfigs(input.projectId);
+          await Promise.all(
+            webhooks.map(async (webhook) => {
+              await sendWebhookNotification(webhook, {
+                event: "entries_need_review",
+                projectId: input.projectId,
+                projectName: project.projectName,
+                details: {
+                  count: input.manualEntryIds.length,
+                  featureId: input.featureId,
+                  confidenceScore: input.confidenceScore,
+                },
+                timestamp: new Date().toISOString(),
+              });
+            }),
+          );
         }
 
         logToolEvent({

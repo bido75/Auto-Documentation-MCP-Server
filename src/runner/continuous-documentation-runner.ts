@@ -5,6 +5,7 @@ import { getStateStore } from "../lib/state-store.js";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { recordRunnerTickHealth } from "../lib/runner-health.js";
 import { createNotionClient } from "../lib/notion-client.js";
+import { sendWebhookNotification } from "../lib/webhook-notifier.js";
 import { selfInitializeProjectFromNotion, type NotionDiscoveryClient } from "../notion/discovery.js";
 import { registerRunReleaseDocumentationPipelineTool } from "../tools/run-release-documentation-pipeline.js";
 
@@ -424,6 +425,7 @@ export class ContinuousDocumentationRunner extends EventEmitter {
       if (targetState.consecutiveFailures >= this.maxConsecutiveFailures) {
         targetState.circuitOpen = true;
         this.emit("circuit:opened", { projectId: target.projectId, repoPath: target.repoPath });
+        await this.notifyCircuitOpened(target, targetState.consecutiveFailures);
       }
 
       logToolEvent({
@@ -447,6 +449,26 @@ export class ContinuousDocumentationRunner extends EventEmitter {
     } finally {
       clearTimeout(timeoutId);
     }
+  }
+
+  private async notifyCircuitOpened(target: ContinuousRunnerTarget, failureCount: number): Promise<void> {
+    const project = await this.stateStore.getProject(target.projectId).catch(() => null);
+    const webhooks = await this.stateStore.listWebhookConfigs(target.projectId).catch(() => []);
+    await Promise.all(
+      webhooks.map(async (webhook) => {
+        await sendWebhookNotification(webhook, {
+          event: "circuit_opened",
+          projectId: target.projectId,
+          projectName: project?.projectName,
+          details: {
+            targetId: `${target.projectId}::${target.repoPath}`,
+            repoPath: target.repoPath,
+            failureCount,
+          },
+          timestamp: new Date().toISOString(),
+        });
+      }),
+    );
   }
 
   private async tryDiscoveryRecovery(

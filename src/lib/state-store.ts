@@ -38,6 +38,25 @@ export interface RunnerFailureTriageHistoryEntry {
   metadata: RunnerFailureTriageMetadata | null;
 }
 
+export type WebhookEvent =
+  | "entries_need_review"
+  | "coverage_dropped"
+  | "circuit_opened"
+  | "documentation_published"
+  | "runner_recovered";
+
+export type WebhookPlatform = "slack" | "teams" | "discord" | "generic";
+
+export interface ProjectWebhookConfig {
+  name: string;
+  url: string;
+  platform: WebhookPlatform;
+  events: WebhookEvent[];
+  coverageDropThreshold: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AssembledManualState {
   userPageId?: string;
   adminPageId?: string;
@@ -61,6 +80,7 @@ export interface ProjectState {
   releaseAutomationRuns?: ReleaseAutomationRun[];
   runnerFailureTriage?: RunnerFailureTriageMetadata;
   runnerFailureTriageHistory?: RunnerFailureTriageHistoryEntry[];
+  webhooks?: Record<string, ProjectWebhookConfig>;
 }
 
 export interface EventSnapshot {
@@ -110,6 +130,7 @@ interface LegacyProjectState {
   releaseAutomationRuns?: ReleaseAutomationRun[];
   runnerFailureTriage?: RunnerFailureTriageMetadata;
   runnerFailureTriageHistory?: RunnerFailureTriageHistoryEntry[];
+  webhooks?: Record<string, ProjectWebhookConfig>;
 }
 
 interface LegacyStateShape {
@@ -246,6 +267,7 @@ function normalizeProject(projectId: string, project: LegacyProjectState): Proje
     releaseAutomationRuns: project.releaseAutomationRuns ?? [],
     runnerFailureTriage: project.runnerFailureTriage ?? {},
     runnerFailureTriageHistory: project.runnerFailureTriageHistory ?? [],
+    webhooks: project.webhooks ?? {},
   };
 }
 
@@ -640,6 +662,28 @@ export class StateStore {
     const state = await this.load();
     const history = state.projects[projectId]?.runnerFailureTriageHistory ?? [];
     return history.slice(0, Math.max(1, limit));
+  }
+
+  async setWebhookConfig(projectId: string, config: ProjectWebhookConfig): Promise<void> {
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
+
+      project.webhooks = project.webhooks ?? {};
+      project.webhooks[config.name] = config;
+    });
+  }
+
+  async getWebhookConfig(projectId: string, name: string): Promise<ProjectWebhookConfig | null> {
+    const state = await this.load();
+    return state.projects[projectId]?.webhooks?.[name] ?? null;
+  }
+
+  async listWebhookConfigs(projectId: string): Promise<ProjectWebhookConfig[]> {
+    const state = await this.load();
+    return Object.values(state.projects[projectId]?.webhooks ?? {});
   }
 }
 

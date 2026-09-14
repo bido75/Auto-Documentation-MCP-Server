@@ -105,9 +105,38 @@ function sortFeatureEntries(entries: ManualAssemblyEntry[]): ManualAssemblyEntry
   });
 }
 
+const SOURCE_APPENDIX_HEADINGS = new Set(["Source-grounded behavior", "Source-defined return fields", "Source-defined constants"]);
+
+function stripSourceAppendices(lines: string[]): string[] {
+  const stripped: string[] = [];
+  let skippingLevel: number | null = null;
+
+  for (const line of lines) {
+    const headingMatch = /^(#{1,6})\s+(.+)$/.exec(line.trim());
+    if (headingMatch) {
+      const level = headingMatch[1]?.length ?? 1;
+      const headingText = headingMatch[2]?.trim() ?? "";
+      if (SOURCE_APPENDIX_HEADINGS.has(headingText)) {
+        skippingLevel = level;
+        continue;
+      }
+      if (skippingLevel !== null && level <= skippingLevel) {
+        skippingLevel = null;
+      }
+    }
+
+    if (skippingLevel !== null) {
+      continue;
+    }
+    stripped.push(line);
+  }
+
+  return stripped;
+}
+
 function normalizeFeatureBody(entry: ManualAssemblyEntry, title: string): string {
   const humanizedBody = humanizeManualMarkdown(entry.body).text.trimEnd();
-  const lines = humanizedBody.split(/\r?\n/);
+  const lines = stripSourceAppendices(humanizedBody.split(/\r?\n/));
   const normalized: string[] = [];
   let skippedTitle = false;
   for (const rawLine of lines) {

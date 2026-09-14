@@ -2,6 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
 import { registerAssembleManualTool } from "./assemble-manual.js";
 import { registerConfigureAiProviderTool } from "./configure-ai-provider.js";
+import { registerConfigureWebhookTool, registerTriggerWebhookTestTool } from "./configure-webhook.js";
 import { registerCaptureOcrReviewTool } from "./capture-ocr-review.js";
 import { registerDiscoverProjectFromNotionTool } from "./discover-project-from-notion.js";
 import { registerExportManualPdfTool } from "./export-manual-pdf.js";
@@ -9,6 +10,7 @@ import { registerExportHelpCenterContentTool } from "./export-help-center-conten
 import { registerGenerateGapReportTool } from "./generate-gap-report.js";
 import { registerGeneratePrCommentPreviewTool } from "./generate-pr-comment-preview.js";
 import { registerGenerateReleaseChangelogTool } from "./generate-release-changelog.js";
+import { registerGetDocumentationHealthTool } from "./get-documentation-health.js";
 import { registerGetRunnerFailureTriageMetadataTool } from "./get-runner-failure-triage-metadata.js";
 import { registerGetRunnerHealthSummaryTool } from "./get-runner-health-summary.js";
 import { registerGetRunnerReleaseAutomationStatusTool } from "./get-runner-release-automation-status.js";
@@ -25,6 +27,7 @@ import { registerSyncManualToLocalDocsTool } from "./sync-manual-to-local-docs.j
 export function registerExtraTools(server: McpServer) {
   registerAssembleManualTool(server);
   registerConfigureAiProviderTool(server);
+  registerConfigureWebhookTool(server);
   registerCaptureOcrReviewTool(server);
   registerDiscoverProjectFromNotionTool(server);
   registerExportManualPdfTool(server);
@@ -32,6 +35,7 @@ export function registerExtraTools(server: McpServer) {
   registerGenerateGapReportTool(server);
   registerGeneratePrCommentPreviewTool(server);
   registerGenerateReleaseChangelogTool(server);
+  registerGetDocumentationHealthTool(server);
   registerGetRunnerFailureTriageMetadataTool(server);
   registerGetRunnerHealthSummaryTool(server);
   registerGetRunnerReleaseAutomationStatusTool(server);
@@ -44,4 +48,5 @@ export function registerExtraTools(server: McpServer) {
   registerSetRunnerFailureTriageMetadataTool(server);
   registerSynthesizeMissingContentTool(server);
   registerSyncManualToLocalDocsTool(server);
+  registerTriggerWebhookTestTool(server);
 }
