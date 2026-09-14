@@ -318,6 +318,8 @@ describe("client-facing MCP error envelope contract", () => {
     registerGetGitDiffSummaryTool(server as never);
     const summary = server.handlers.get("get_git_diff_summary");
     expect(summary).toBeDefined();
+    const previousAllowedRoots = process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
+    process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = tmpdir();
 
     try {
       await summary!({
@@ -330,6 +332,9 @@ describe("client-facing MCP error envelope contract", () => {
         tool: "get_git_diff_summary",
         code: "GIT_DIFF_SUMMARY_FAILED",
       });
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
+      else process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = previousAllowedRoots;
     }
   });
 

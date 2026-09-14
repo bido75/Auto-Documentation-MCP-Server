@@ -1,9 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes, scryptSync } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { existsSync } from "node:fs";
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { getOptionalRuntimeConfig } from "../config.js";
+import type { VisualEvidence } from "./visual-evidence.js";
 
-export const CURRENT_STATE_SCHEMA_VERSION = 3;
+export const CURRENT_STATE_SCHEMA_VERSION = 4;
 
 export interface ProjectDatabases {
   projectsDatabaseId: string;
@@ -34,6 +38,11 @@ export interface RunnerFailureTriageHistoryEntry {
   metadata: RunnerFailureTriageMetadata | null;
 }
 
+export interface AssembledManualState {
+  userPageId?: string;
+  adminPageId?: string;
+}
+
 export interface ProjectState {
   projectId: string;
   projectName: string;
@@ -46,6 +55,8 @@ export interface ProjectState {
   featuresByKey: Record<string, string>;
   eventsByExternalId: Record<string, string>;
   eventSnapshots: Record<string, EventSnapshot>;
+  visualEvidenceById?: Record<string, VisualEvidence>;
+  assembledManuals?: AssembledManualState;
   lastSeenReleaseTag?: string | null;
   releaseAutomationRuns?: ReleaseAutomationRun[];
   runnerFailureTriage?: RunnerFailureTriageMetadata;
@@ -69,6 +80,10 @@ interface StateShape {
 }
 
 const DEFAULT_STATE: StateShape = { schemaVersion: CURRENT_STATE_SCHEMA_VERSION, projects: {} };
+const mutationQueues = new Map<string, Promise<void>>();
+const CANONICAL_STATE_DIRECTORY = ".auto-doc-mcp";
+const CANONICAL_STATE_FILE = "state.json";
+const KNOWN_LEGACY_STATE_FILE = "autonomy-test.state.json";
 
 interface StateEnvelope {
   schemaVersion: number;
@@ -89,6 +104,8 @@ interface LegacyProjectState {
   featuresByKey?: Record<string, string>;
   eventsByExternalId?: Record<string, string>;
   eventSnapshots?: Record<string, EventSnapshot>;
+  visualEvidenceById?: Record<string, VisualEvidence>;
+  assembledManuals?: AssembledManualState;
   lastSeenReleaseTag?: string | null;
   releaseAutomationRuns?: ReleaseAutomationRun[];
   runnerFailureTriage?: RunnerFailureTriageMetadata;
@@ -100,8 +117,78 @@ interface LegacyStateShape {
   projects?: Record<string, LegacyProjectState>;
 }
 
+export interface StateStorePathResolution {
+  filePath: string;
+  explicitOverride: boolean;
+  canonical: boolean;
+  legacyStateFile: string;
+}
+
+export interface StateStorePathOptions {
+  cwd?: string;
+  homeDir?: string;
+}
+
+interface StateStoreOptions extends StateStorePathOptions {
+  legacyStateFile?: string;
+}
+
+function findPackageRoot(startDir = dirname(fileURLToPath(import.meta.url))): string {
+  let candidate = startDir;
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (existsSync(resolve(candidate, "package.json"))) {
+      return candidate;
+    }
+
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      break;
+    }
+    candidate = parent;
+  }
+
+  return process.cwd();
+}
+
+export function resolveStateStorePath(
+  env: NodeJS.ProcessEnv = process.env,
+  options: StateStorePathOptions = {},
+): StateStorePathResolution {
+  const legacyRoot = options.cwd ?? findPackageRoot();
+  const homeDir = options.homeDir ?? homedir();
+  const override = env.AUTO_DOC_STATE_FILE?.trim();
+  const legacyStateFile = resolve(legacyRoot, KNOWN_LEGACY_STATE_FILE);
+
+  if (override) {
+    return {
+      filePath: resolve(override),
+      explicitOverride: true,
+      canonical: false,
+      legacyStateFile,
+    };
+  }
+
+  return {
+    filePath: resolve(homeDir, CANONICAL_STATE_DIRECTORY, CANONICAL_STATE_FILE),
+    explicitOverride: false,
+    canonical: true,
+    legacyStateFile,
+  };
+}
+
 function computeChecksum(state: StateShape): string {
   return createHash("sha256").update(JSON.stringify(state)).digest("hex");
+}
+
+function createDefaultState(): StateShape {
+  return {
+    schemaVersion: DEFAULT_STATE.schemaVersion,
+    projects: {},
+  };
+}
+
+function computeBytesChecksum(data: Buffer): string {
+  return createHash("sha256").update(data).digest("hex");
 }
 
 function encryptState(data: string, key: string): string {
@@ -153,6 +240,8 @@ function normalizeProject(projectId: string, project: LegacyProjectState): Proje
     featuresByKey: project.featuresByKey ?? {},
     eventsByExternalId: project.eventsByExternalId ?? {},
     eventSnapshots: project.eventSnapshots ?? {},
+    visualEvidenceById: project.visualEvidenceById ?? {},
+    assembledManuals: project.assembledManuals ?? {},
     lastSeenReleaseTag: project.lastSeenReleaseTag ?? null,
     releaseAutomationRuns: project.releaseAutomationRuns ?? [],
     runnerFailureTriage: project.runnerFailureTriage ?? {},
@@ -178,35 +267,121 @@ function migrateState(raw: LegacyStateShape): { migrated: StateShape; changed: b
   return { migrated, changed };
 }
 
+async function runExclusive<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
+  const key = resolve(filePath);
+  const previous = mutationQueues.get(key) ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolveQueued) => {
+    release = resolveQueued;
+  });
+  const queued = previous.then(() => current, () => current);
+  mutationQueues.set(key, queued);
+
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (mutationQueues.get(key) === queued) {
+      mutationQueues.delete(key);
+    }
+  }
+}
+
 export class StateStore {
-  constructor(private readonly filePath = ".auto-doc/state.json") {}
+  private readonly filePath: string;
+  private readonly allowLegacyMigration: boolean;
+  private readonly legacyStateFile: string;
+
+  constructor(filePath?: string, options: StateStoreOptions = {}) {
+    const resolution = filePath
+      ? {
+          filePath: resolve(filePath),
+          explicitOverride: true,
+          canonical: false,
+          legacyStateFile: resolve(options.cwd ?? process.cwd(), KNOWN_LEGACY_STATE_FILE),
+        }
+      : resolveStateStorePath(process.env, options);
+
+    this.filePath = resolution.filePath;
+    this.allowLegacyMigration = !resolution.explicitOverride && resolution.canonical;
+    this.legacyStateFile = options.legacyStateFile ? resolve(options.legacyStateFile) : resolution.legacyStateFile;
+  }
 
   async load(): Promise<StateShape> {
-    try {
-      const raw = await readFile(this.filePath, "utf8");
-      const parsed = JSON.parse(raw) as LegacyStateShape | StateEnvelope;
-      let source: LegacyStateShape;
+    return this.loadFromPath(this.filePath);
+  }
 
-      if (isStateEnvelope(parsed)) {
-        const stateData = parsed.encryptedState
-          ? (JSON.parse(decryptState(parsed.encryptedState, getOptionalRuntimeConfig().stateEncryptionKey)) as LegacyStateShape)
-          : (parsed.state as LegacyStateShape | undefined);
+  private parseStateContents(raw: string): { state: StateShape; changed: boolean } {
+    const parsed = JSON.parse(raw) as LegacyStateShape | StateEnvelope;
+    let source: LegacyStateShape;
 
-        if (!stateData) {
-          throw new Error("State file is missing persisted state data.");
-        }
+    if (isStateEnvelope(parsed)) {
+      const stateData = parsed.encryptedState
+        ? (JSON.parse(decryptState(parsed.encryptedState, getOptionalRuntimeConfig().stateEncryptionKey)) as LegacyStateShape)
+        : (parsed.state as LegacyStateShape | undefined);
 
-        const checksum = computeChecksum(stateData as StateShape);
-        if (checksum !== parsed.checksum) {
-          throw new Error("State file checksum mismatch. The local state file may be corrupted.");
-        }
-
-        source = stateData;
-      } else {
-        source = parsed;
+      if (!stateData) {
+        throw new Error("State file is missing persisted state data.");
       }
 
-      const { migrated, changed } = migrateState(source);
+      const checksum = computeChecksum(stateData as StateShape);
+      if (checksum !== parsed.checksum) {
+        throw new Error("State file checksum mismatch. The local state file may be corrupted.");
+      }
+
+      source = stateData;
+    } else {
+      source = parsed;
+    }
+
+    const { migrated, changed } = migrateState(source);
+    return { state: migrated, changed };
+  }
+
+  private async tryMigrateKnownLegacyState(): Promise<StateShape | null> {
+    let legacyBytes: Buffer;
+    try {
+      legacyBytes = await readFile(this.legacyStateFile);
+    } catch (error) {
+      const asNodeError = error as NodeJS.ErrnoException;
+      if (asNodeError.code === "ENOENT") {
+        return null;
+      }
+
+      throw new Error(`PROJECT_STATE_MIGRATION_FAILED: Could not read known legacy state '${this.legacyStateFile}': ${asNodeError.message}`);
+    }
+
+    let parsedLegacy: StateShape;
+    try {
+      parsedLegacy = this.parseStateContents(legacyBytes.toString("utf8")).state;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`PROJECT_STATE_MIGRATION_FAILED: Known legacy state '${this.legacyStateFile}' is not usable: ${message}`);
+    }
+
+    await mkdir(dirname(this.filePath), { recursive: true });
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const sourceBackupPath = resolve(dirname(this.filePath), `state.migration-source.${timestamp}.bak`);
+    await copyFile(this.legacyStateFile, sourceBackupPath);
+    await copyFile(this.legacyStateFile, this.filePath);
+
+    const sourceHash = computeBytesChecksum(legacyBytes);
+    const copiedHash = computeBytesChecksum(await readFile(this.filePath));
+    if (sourceHash !== copiedHash) {
+      await unlink(this.filePath).catch(() => undefined);
+      throw new Error(
+        `PROJECT_STATE_MIGRATION_FAILED: Canonical state checksum mismatch after copying '${this.legacyStateFile}' to '${this.filePath}'.`,
+      );
+    }
+
+    return parsedLegacy;
+  }
+
+  private async loadFromPath(filePath: string): Promise<StateShape> {
+    try {
+      const raw = await readFile(filePath, "utf8");
+      const { state: migrated, changed } = this.parseStateContents(raw);
       if (changed) {
         await this.save(migrated);
       }
@@ -215,7 +390,14 @@ export class StateStore {
     } catch (error) {
       const asNodeError = error as NodeJS.ErrnoException;
       if (asNodeError.code === "ENOENT") {
-        return { ...DEFAULT_STATE };
+        if (filePath === this.filePath && this.allowLegacyMigration) {
+          const migrated = await this.tryMigrateKnownLegacyState();
+          if (migrated) {
+            return migrated;
+          }
+        }
+
+        return createDefaultState();
       }
 
       throw error;
@@ -230,7 +412,8 @@ export class StateStore {
       checksum: computeChecksum(state),
       encryptedState,
     };
-    const tempFilePath = `${this.filePath}.tmp`;
+    const tempFilePath = `${this.filePath}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
+    await copyFile(this.filePath, `${this.filePath}.bak`).catch(() => undefined);
     await writeFile(tempFilePath, JSON.stringify(envelope, null, 2), "utf8");
     try {
       await rename(tempFilePath, this.filePath);
@@ -240,10 +423,18 @@ export class StateStore {
     }
   }
 
+  private async mutate(mutator: (state: StateShape) => void | Promise<void>): Promise<void> {
+    await runExclusive(this.filePath, async () => {
+      const state = await this.load();
+      await mutator(state);
+      await this.save(state);
+    });
+  }
+
   async upsertProject(project: ProjectState): Promise<ProjectState> {
-    const state = await this.load();
-    state.projects[project.projectId] = project;
-    await this.save(state);
+    await this.mutate((state) => {
+      state.projects[project.projectId] = project;
+    });
     return project;
   }
 
@@ -253,14 +444,14 @@ export class StateStore {
   }
 
   async setFeature(projectId: string, featureKey: string, featurePageId: string): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.featuresByKey[featureKey] = featurePageId;
-    await this.save(state);
+      project.featuresByKey[featureKey] = featurePageId;
+    });
   }
 
   async getFeature(projectId: string, featureKey: string): Promise<string | null> {
@@ -269,14 +460,14 @@ export class StateStore {
   }
 
   async setEvent(projectId: string, externalEventId: string, notionPageId: string): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.eventsByExternalId[externalEventId] = notionPageId;
-    await this.save(state);
+      project.eventsByExternalId[externalEventId] = notionPageId;
+    });
   }
 
   async getEvent(projectId: string, externalEventId: string): Promise<string | null> {
@@ -285,19 +476,57 @@ export class StateStore {
   }
 
   async setEventSnapshot(projectId: string, externalEventId: string, snapshot: EventSnapshot): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.eventSnapshots[externalEventId] = snapshot;
-    await this.save(state);
+      project.eventSnapshots[externalEventId] = snapshot;
+    });
   }
 
   async getEventSnapshot(projectId: string, externalEventId: string): Promise<EventSnapshot | null> {
     const state = await this.load();
     return state.projects[projectId]?.eventSnapshots[externalEventId] ?? null;
+  }
+
+  async setVisualEvidence(projectId: string, visual: VisualEvidence): Promise<void> {
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
+
+      project.visualEvidenceById = project.visualEvidenceById ?? {};
+      project.visualEvidenceById[visual.visualId] = visual;
+    });
+  }
+
+  async getVisualEvidence(projectId: string, visualId: string): Promise<VisualEvidence | null> {
+    const state = await this.load();
+    return state.projects[projectId]?.visualEvidenceById?.[visualId] ?? null;
+  }
+
+  async setAssembledManualPage(projectId: string, audience: "user" | "admin", pageId: string): Promise<void> {
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
+
+      project.assembledManuals = project.assembledManuals ?? {};
+      if (audience === "user") {
+        project.assembledManuals.userPageId = pageId;
+      } else {
+        project.assembledManuals.adminPageId = pageId;
+      }
+    });
+  }
+
+  async getAssembledManualPages(projectId: string): Promise<AssembledManualState> {
+    const state = await this.load();
+    return state.projects[projectId]?.assembledManuals ?? {};
   }
 
   async getLastSeenReleaseTag(projectId: string, _repoPath: string): Promise<string | null> {
@@ -306,14 +535,14 @@ export class StateStore {
   }
 
   async setLastSeenReleaseTag(projectId: string, _repoPath: string, releaseTag: string): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.lastSeenReleaseTag = releaseTag;
-    await this.save(state);
+      project.lastSeenReleaseTag = releaseTag;
+    });
   }
 
   async listReleaseAutomationRuns(projectId: string, _repoPath: string): Promise<ReleaseAutomationRun[]> {
@@ -330,21 +559,21 @@ export class StateStore {
     attemptedAt: string;
     errorMessage?: string;
   }): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[input.projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${input.projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[input.projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${input.projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.releaseAutomationRuns = project.releaseAutomationRuns ?? [];
-    project.releaseAutomationRuns.unshift({
-      releaseTag: input.releaseTag,
-      releaseVersion: input.releaseVersion,
-      status: input.status,
-      attemptedAt: input.attemptedAt,
-      errorMessage: input.errorMessage,
+      project.releaseAutomationRuns = project.releaseAutomationRuns ?? [];
+      project.releaseAutomationRuns.unshift({
+        releaseTag: input.releaseTag,
+        releaseVersion: input.releaseVersion,
+        status: input.status,
+        attemptedAt: input.attemptedAt,
+        errorMessage: input.errorMessage,
+      });
     });
-    await this.save(state);
   }
 
   async getReleaseAutomationRun(projectId: string, _repoPath: string, releaseTag: string): Promise<ReleaseAutomationRun | null> {
@@ -363,44 +592,44 @@ export class StateStore {
     repoPathOrMetadata: string | RunnerFailureTriageMetadata,
     maybeMetadata?: RunnerFailureTriageMetadata,
   ): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    const metadata = typeof repoPathOrMetadata === "string" ? maybeMetadata : repoPathOrMetadata;
-    if (!metadata) {
-      throw new Error("Runner failure triage metadata is required.");
-    }
+      const metadata = typeof repoPathOrMetadata === "string" ? maybeMetadata : repoPathOrMetadata;
+      if (!metadata) {
+        throw new Error("Runner failure triage metadata is required.");
+      }
 
-    project.runnerFailureTriage = metadata;
-    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory ?? [];
-    project.runnerFailureTriageHistory.unshift({
-      changedAt: new Date().toISOString(),
-      action: "set",
-      metadata,
+      project.runnerFailureTriage = metadata;
+      project.runnerFailureTriageHistory = project.runnerFailureTriageHistory ?? [];
+      project.runnerFailureTriageHistory.unshift({
+        changedAt: new Date().toISOString(),
+        action: "set",
+        metadata,
+      });
+      project.runnerFailureTriageHistory = project.runnerFailureTriageHistory.slice(0, 100);
     });
-    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory.slice(0, 100);
-    await this.save(state);
   }
 
   async clearRunnerFailureTriageMetadata(projectId: string, _repoPath: string): Promise<void> {
-    const state = await this.load();
-    const project = state.projects[projectId];
-    if (!project) {
-      throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
-    }
+    await this.mutate((state) => {
+      const project = state.projects[projectId];
+      if (!project) {
+        throw new Error(`Unknown projectId '${projectId}'. Run initialize_project_manual first.`);
+      }
 
-    project.runnerFailureTriage = {};
-    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory ?? [];
-    project.runnerFailureTriageHistory.unshift({
-      changedAt: new Date().toISOString(),
-      action: "clear",
-      metadata: null,
+      project.runnerFailureTriage = {};
+      project.runnerFailureTriageHistory = project.runnerFailureTriageHistory ?? [];
+      project.runnerFailureTriageHistory.unshift({
+        changedAt: new Date().toISOString(),
+        action: "clear",
+        metadata: null,
+      });
+      project.runnerFailureTriageHistory = project.runnerFailureTriageHistory.slice(0, 100);
     });
-    project.runnerFailureTriageHistory = project.runnerFailureTriageHistory.slice(0, 100);
-    await this.save(state);
   }
 
   async listRunnerFailureTriageHistory(
@@ -415,10 +644,13 @@ export class StateStore {
 }
 
 let sharedStore: StateStore | null = null;
+let sharedStorePath: string | null = null;
 
 export function getStateStore(): StateStore {
-  if (!sharedStore) {
+  const resolution = resolveStateStorePath();
+  if (!sharedStore || sharedStorePath !== resolution.filePath) {
     sharedStore = new StateStore();
+    sharedStorePath = resolution.filePath;
   }
 
   return sharedStore;

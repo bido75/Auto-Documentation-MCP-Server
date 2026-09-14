@@ -40,7 +40,9 @@ Manual packager assembles a release-ready manual on demand
 - **Schema validation:** `zod`
 - **Git integration:** `simple-git`
 - **Screenshot capture:** `playwright` (optional, non-blocking)
-- **Transport:** stdio (for local IDE integration)
+- **Transport:** HTTP-SSE (for local IDE integration)
+
+The bridge exposes `GET /sse` to open an MCP session and `POST /messages?sessionId=...` to send JSON-RPC tool calls for that session.
 
 ### Install commands
 ```bash

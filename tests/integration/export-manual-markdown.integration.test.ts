@@ -117,8 +117,10 @@ describe("export_manual_markdown", () => {
     );
 
     expect(result.projectId).toBe("proj_1");
-    expect(result.markdown).toContain("# Acme Manual Export");
-    expect(result.markdown).toContain("## Export invoices");
+    expect(result.markdown).toContain("# User Manual");
+    expect(result.markdown).toContain("# Admin Manual");
+    expect(result.markdown).toContain("Table of contents");
+    expect(result.markdown).toContain("Export invoices");
     expect(result.markdown).toContain("Go to Billing Settings and click Export.");
   });
 });

@@ -29,7 +29,7 @@ export async function activate(context: vscode.ExtensionContext) {
         password: true,
         ignoreFocusOut: true,
         value: existing ?? "",
-        validateInput: (value) => (value.trim().length > 0 ? null : "Token cannot be empty."),
+        validateInput: (value: string) => (value.trim().length > 0 ? null : "Token cannot be empty."),
       });
 
       if (!token) {

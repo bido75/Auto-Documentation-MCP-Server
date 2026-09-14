@@ -10,11 +10,38 @@ const TWILIO_KEY = /\b(?:AC|SK)[a-fA-F0-9]{32}\b/g;
 const SECRET_QUERY_PARAM = new RegExp(`([?&](?:${SECRET_NAME})=)([^&\\s]+)`, "gi");
 const PRIVATE_KEY_BLOCK = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/gi;
 
+function unquote(value: string): string {
+  return value.replace(/^["']|["']$/g, "");
+}
+
+function isNonSecretConfigAssignment(key: string, value: string): boolean {
+  const normalizedKey = key.toUpperCase();
+  const normalizedValue = unquote(value).toLowerCase();
+  const isBoolean = normalizedValue === "true" || normalizedValue === "false";
+  const isSafeTokenControlFlag =
+    normalizedKey === "AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK" ||
+    normalizedKey === "AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE";
+  return isBoolean && isSafeTokenControlFlag;
+}
+
+function restoreKnownSafeConfigFlags(input: string): string {
+  return input
+    .replace(/\bAUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK=\[REDACTED\]/g, "AUTO_DOC_ENABLE_ENV_TOKEN_FALLBACK=true")
+    .replace(/\bAUTO_DOC_ALLOW_UNAUTHENTICATED_SSE=\[REDACTED\]/g, "AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE=false");
+}
+
 export function redactSecrets(input: string): string {
   let redacted = input;
 
   redacted = redacted.replace(PRIVATE_KEY_BLOCK, "[REDACTED_PRIVATE_KEY_BLOCK]");
-  redacted = redacted.replace(SECRET_ASSIGNMENT, (_match, key) => `${String(key)}=[REDACTED]`);
+  redacted = redacted.replace(SECRET_ASSIGNMENT, (match, key, _quote, value) => {
+    const keyText = String(key);
+    const valueText = String(value);
+    if (isNonSecretConfigAssignment(keyText, valueText)) {
+      return String(match);
+    }
+    return `${keyText}=[REDACTED]`;
+  });
   redacted = redacted.replace(SECRET_JSON_PAIR, (_match, prefix) => `${String(prefix)}\"[REDACTED]\"`);
   redacted = redacted.replace(SECRET_HEADER, (_match, key) => `${String(key)}: [REDACTED]`);
   redacted = redacted.replace(BEARER_TOKEN, "Bearer [REDACTED]");
@@ -24,5 +51,5 @@ export function redactSecrets(input: string): string {
   redacted = redacted.replace(TWILIO_KEY, "[REDACTED_TWILIO_KEY]");
   redacted = redacted.replace(SECRET_QUERY_PARAM, (_match, prefix) => `${String(prefix)}[REDACTED]`);
 
-  return redacted;
+  return restoreKnownSafeConfigFlags(redacted);
 }

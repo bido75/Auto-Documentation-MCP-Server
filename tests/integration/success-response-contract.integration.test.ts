@@ -40,6 +40,34 @@ vi.mock("../../src/lib/state-store.js", async () => {
   };
 });
 
+vi.mock("../../src/providers/factory.js", () => ({
+  analyzeWithFallback: vi.fn(async () => ({
+    featureName: "Billing Settings",
+    featureKey: "route:billing-settings",
+    shouldDocument: true,
+    audiences: ["User", "Admin"],
+    userGuide: {
+      summary: "Users can export invoices from billing settings.",
+      steps: ["Open Billing settings", "Select Export invoices"],
+      expectedOutcome: "Invoice export is available.",
+      possibleErrors: [],
+    },
+    adminGuide: {
+      configRequired: ["No extra configuration required"],
+      endpointsAffected: [],
+      envVarsRequired: [],
+      verificationSteps: ["Verify invoice export succeeds"],
+      troubleshooting: [],
+    },
+    confidenceScore: 90,
+    confidenceReasons: ["Provider contract mock generated documentation."],
+    reviewQuestions: [],
+    providerUsed: "contract-test-provider",
+    generationMs: 1,
+  })),
+  embedText: vi.fn(async () => [1, 0, 0]),
+}));
+
 vi.mock("../../src/lib/screenshots.js", () => ({
   captureScreenshot: async (_url: string, outputPath: string) => outputPath,
 }));
@@ -535,20 +563,28 @@ describe("tool success response contract", () => {
     expect(screenshot).toBeDefined();
 
     const repoDir = await mkdtemp(join(tmpdir(), "auto-doc-git-success-"));
+    const previousAllowedRoots = process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
+    process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = repoDir;
     const git = simpleGit(repoDir);
-    await git.init();
-    await writeFile(join(repoDir, "README.md"), "hello\n", "utf-8");
+    let summary!: { traceId: string; mode: string; summary: string };
+    try {
+      await git.init();
+      await writeFile(join(repoDir, "README.md"), "hello\n", "utf-8");
 
-    const summary = parseToolResult<{
-      traceId: string;
-      mode: string;
-      summary: string;
-    }>(
-      await diff!({
-        repoPath: repoDir,
-        mode: "working_tree",
-      }),
-    );
+      summary = parseToolResult<{
+        traceId: string;
+        mode: string;
+        summary: string;
+      }>(
+        await diff!({
+          repoPath: repoDir,
+          mode: "working_tree",
+        }),
+      );
+    } finally {
+      if (previousAllowedRoots === undefined) delete process.env.AUTO_DOC_ALLOWED_REPO_ROOTS;
+      else process.env.AUTO_DOC_ALLOWED_REPO_ROOTS = previousAllowedRoots;
+    }
 
     expect(typeof summary.traceId).toBe("string");
     expect(summary.mode).toBe("working_tree");

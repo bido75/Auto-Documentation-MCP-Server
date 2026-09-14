@@ -1,4 +1,4 @@
-// @ts-nocheck
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
@@ -6,37 +6,68 @@ import { createNotionClient } from "../lib/notion-client.js";
 import { runProjectPreflight } from "../lib/notion-preflight.js";
 import { withNotionRetry } from "../lib/notion-retry.js";
 import { getStateStore } from "../lib/state-store.js";
-function getTitleValue(properties, key) {
+
+type PropertyMap = Record<string, unknown>;
+type RichTextPart = { plain_text?: string };
+type NotionPage = { id: string; properties?: PropertyMap };
+type QueryInput = { database_id: string; filter?: unknown; page_size?: number; start_cursor?: string };
+type QueryResponse = { results: NotionPage[]; has_more?: boolean; next_cursor?: string | null };
+type BlockResponse = { results: Array<{ type?: string; paragraph?: { rich_text?: RichTextPart[] } }> };
+type NotionClientLike = {
+    databases: { query(input: QueryInput): Promise<QueryResponse> };
+    blocks: { children: { list(input: { block_id: string; page_size: number }): Promise<BlockResponse> } };
+};
+type ChangelogEntry = {
+    id: string;
+    title: string;
+    entryType: string;
+    audience: string;
+    confidenceScore: number | null;
+    body: string;
+};
+type BuildChangelogMarkdownInput = { projectName: string; releaseVersion: string; entries: ChangelogEntry[] };
+type GenerateReleaseChangelogInput = {
+    projectId: string;
+    releaseVersion: string;
+    maxEntries?: number;
+    traceId?: string;
+};
+
+function getTitleValue(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.title?.[0]?.text?.content ?? null;
+    return typeof value === "object" && value !== null
+        ? ((value as { title?: Array<{ text?: { content?: string } }> }).title?.[0]?.text?.content ?? null)
+        : null;
 }
-function getSelectName(properties, key) {
+function getSelectName(properties: PropertyMap, key: string): string | null {
     const value = properties[key];
-    return value?.select?.name ?? null;
+    return typeof value === "object" && value !== null ? ((value as { select?: { name?: string } }).select?.name ?? null) : null;
 }
-function getNumberValue(properties, key) {
+function getNumberValue(properties: PropertyMap, key: string): number | null {
     const value = properties[key];
-    return typeof value?.number === "number" ? value.number : null;
+    return typeof value === "object" && value !== null && typeof (value as { number?: unknown }).number === "number"
+        ? (value as { number: number }).number
+        : null;
 }
-async function queryAll(notion, input) {
-    const results = [];
-    let cursor;
+async function queryAll(notion: NotionClientLike, input: QueryInput): Promise<NotionPage[]> {
+    const results: NotionPage[] = [];
+    let cursor: string | undefined;
     do {
-        const payload = {
+        const payload: QueryInput = {
             ...input,
             ...(cursor ? { start_cursor: cursor } : {}),
         };
-        const response = (await withNotionRetry(() => notion.databases.query(payload), {
+        const response = await withNotionRetry(() => notion.databases.query(payload), {
             operationName: "databases.query",
             payload,
-        }));
+        });
         results.push(...response.results);
         cursor = response.has_more ? (response.next_cursor ?? undefined) : undefined;
     } while (cursor);
     return results;
 }
-async function loadEntryBodySummary(notion, pageId) {
-    const response = (await withNotionRetry(() => notion.blocks.children.list({
+async function loadEntryBodySummary(notion: NotionClientLike, pageId: string): Promise<string> {
+    const response = await withNotionRetry(() => notion.blocks.children.list({
         block_id: pageId,
         page_size: 100,
     }), {
@@ -45,19 +76,19 @@ async function loadEntryBodySummary(notion, pageId) {
             block_id: pageId,
             page_size: 100,
         },
-    }));
+    });
     for (const block of response.results) {
         if (block.type !== "paragraph") {
             continue;
         }
-        const text = (block.paragraph?.rich_text ?? []).map((part) => part.plain_text ?? "").join(" ").trim();
+        const text = (block.paragraph?.rich_text ?? []).map((part: RichTextPart) => part.plain_text ?? "").join(" ").trim();
         if (text.length > 0) {
             return text.length > 220 ? `${text.slice(0, 220)}...` : text;
         }
     }
     return "";
 }
-function sectionFor(entryType, audience) {
+function sectionFor(entryType: string, audience: string): "user" | "admin" | "developer" {
     if (entryType === "Developer Note" || audience === "Internal") {
         return "developer";
     }
@@ -66,14 +97,14 @@ function sectionFor(entryType, audience) {
     }
     return "user";
 }
-function formatEntryLine(entry) {
+function formatEntryLine(entry: ChangelogEntry): string {
     const score = typeof entry.confidenceScore === "number" ? ` (confidence ${entry.confidenceScore})` : "";
     return entry.body.length > 0 ? `- ${entry.title}${score}: ${entry.body}` : `- ${entry.title}${score}`;
 }
-function buildChangelogMarkdown(input) {
-    const user = [];
-    const admin = [];
-    const developer = [];
+function buildChangelogMarkdown(input: BuildChangelogMarkdownInput): string {
+    const user: string[] = [];
+    const admin: string[] = [];
+    const developer: string[] = [];
     for (const entry of input.entries) {
         const line = formatEntryLine(entry);
         const section = sectionFor(entry.entryType, entry.audience);
@@ -87,7 +118,7 @@ function buildChangelogMarkdown(input) {
             developer.push(line);
         }
     }
-    const section = (title, lines) => [
+    const section = (title: string, lines: string[]) => [
         `## ${title}`,
         "",
         ...(lines.length > 0 ? lines : ["- No updates in this section."]),
@@ -101,13 +132,13 @@ function buildChangelogMarkdown(input) {
         ...section("Developer Notes", developer),
     ].join("\n");
 }
-export function registerGenerateReleaseChangelogTool(server) {
+export function registerGenerateReleaseChangelogTool(server: McpServer): void {
     server.tool("generate_release_changelog", "Generates a release changelog markdown from approved/published manual entries linked to a release.", {
         projectId: z.string(),
         releaseVersion: z.string().min(1),
         maxEntries: z.number().int().positive().max(200).default(50),
         traceId: z.string().optional(),
-    }, async ({ projectId, releaseVersion, maxEntries, traceId: incomingTraceId }) => {
+    }, async ({ projectId, releaseVersion, maxEntries = 50, traceId: incomingTraceId }: GenerateReleaseChangelogInput) => {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         logToolEvent({
@@ -124,8 +155,9 @@ export function registerGenerateReleaseChangelogTool(server) {
             if (!project) {
                 throw new Error("Unknown projectId. Run initialize_project_manual first.");
             }
-            const notion = createNotionClient();
-            await runProjectPreflight({ notion, project });
+            const rawNotion = createNotionClient();
+            await runProjectPreflight({ notion: rawNotion, project });
+            const notion = rawNotion as unknown as NotionClientLike;
             const projectPageId = project.projectPageId ?? project.projectId;
             const releasePages = await queryAll(notion, {
                 database_id: project.databases.releasesDatabaseId,
@@ -144,7 +176,7 @@ export function registerGenerateReleaseChangelogTool(server) {
                 page_size: 10,
             });
             const releasePageId = releasePages[0]?.id ?? null;
-            const manualFilters = [
+            const manualFilters: unknown[] = [
                 {
                     property: "Project",
                     relation: { contains: projectPageId },
@@ -173,7 +205,7 @@ export function registerGenerateReleaseChangelogTool(server) {
                 filter: { and: manualFilters },
                 page_size: 100,
             });
-            const entries = [];
+            const entries: ChangelogEntry[] = [];
             for (const page of entryPages.slice(0, maxEntries)) {
                 const properties = page.properties ?? {};
                 entries.push({

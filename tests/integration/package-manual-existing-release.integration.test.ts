@@ -112,7 +112,14 @@ describe("package_manual existing release behavior", () => {
     );
     const create = vi.fn(async () => ({ id: "release_page_new", url: "https://notion.local/release_page_new" }));
     const update = vi.fn(async (input: { page_id: string }) => ({ id: input.page_id, url: `https://notion.local/${input.page_id}` }));
-    const listBlocks = vi.fn(async () => ({ results: [] }));
+    const listBlocks = vi.fn(async ({ block_id }: { block_id: string }) => ({
+      results:
+        block_id === "manual_1"
+          ? [{ type: "paragraph", paragraph: { rich_text: [{ plain_text: "User thing setup steps." }] } }]
+          : block_id === "manual_2"
+            ? [{ type: "paragraph", paragraph: { rich_text: [{ plain_text: "Admin thing verification steps." }] } }]
+            : [],
+    }));
 
     testContext.notion = {
       databases: {
@@ -147,8 +154,10 @@ describe("package_manual existing release behavior", () => {
 
     expect(result.releasePageId).toBe("release_page_existing");
     expect(result.includedEntryCount).toBe(2);
-    expect(result.output).toContain("User thing");
-    expect(result.output).toContain("Admin thing");
+    expect(result.output).toContain("# User Manual");
+    expect(result.output).toContain("# Admin Manual");
+    expect(result.output).toContain("User thing setup steps.");
+    expect(result.output).toContain("Admin thing verification steps.");
     expect(create).not.toHaveBeenCalled();
 
     const releaseUpdateCall = update.mock.calls.find((call) => call[0].page_id === "release_page_existing");

@@ -1,0 +1,12 @@
+{
+  "servers": {
+    "auto-documentation-mcp-server": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["build/src/index.js"],
+      "env": {
+        "AUTO_DOC_RUNTIME_MODE": "mcp"
+      }
+    }
+  }
+}

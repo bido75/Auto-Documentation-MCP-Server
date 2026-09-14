@@ -1,26 +1,52 @@
 import OpenAI from "openai";
-import { getOptionalRuntimeConfig } from "../config.js";
-import { buildSharedPromptContent, type ModelAnalysis, type ModelProvider, type StructuredEvidence } from "./base.js";
+import { resolveOptionalRuntimeConfig } from "../lib/runtime-context.js";
+import {
+  buildManualAuthoringPrompt,
+  buildSharedPromptContent,
+  type ManualAuthoringProviderInput,
+  type ManualAuthoringProviderResult,
+  type ModelAnalysis,
+  type ModelProvider,
+  type StructuredEvidence,
+} from "./base.js";
+
+export type OpenAIProviderOptions = {
+  id?: string;
+  displayName?: string;
+  endpoint?: string;
+  apiKey?: string;
+  modelName?: string;
+  timeoutMs?: number;
+};
 
 export class OpenAIProvider implements ModelProvider {
-  readonly id: string = "cloud-openai";
+  readonly id: string;
   readonly supportsEmbeddings = true;
   readonly displayName: string;
   private readonly client: OpenAI;
+  private readonly endpoint: string;
+  private readonly apiKey?: string;
+  private readonly modelName?: string;
+  private readonly timeoutMs: number;
 
-  constructor() {
-    const runtime = getOptionalRuntimeConfig();
-    this.displayName = `OpenAI (${runtime.provider.modelName})`;
-    const maybeBifrostHeaders = runtime.provider.endpoint.includes("bifrost")
+  constructor(options: OpenAIProviderOptions = {}) {
+    const runtime = resolveOptionalRuntimeConfig();
+    this.id = options.id ?? "cloud-openai";
+    this.endpoint = options.endpoint ?? runtime.provider.endpoint;
+    this.apiKey = options.apiKey ?? runtime.provider.apiKey;
+    this.modelName = options.modelName ?? runtime.provider.modelName;
+    this.timeoutMs = options.timeoutMs ?? runtime.provider.timeoutMs;
+    this.displayName = options.displayName ?? `OpenAI (${this.modelName})`;
+    const maybeBifrostHeaders = this.endpoint.includes("bifrost")
       ? {
           ...(runtime.provider.bifrostVk ? { "x-bf-vk": runtime.provider.bifrostVk } : {}),
           "x-bf-eh-client-id": "auto-doc-mcp",
         }
       : undefined;
     this.client = new OpenAI({
-      apiKey: runtime.provider.apiKey,
-      baseURL: runtime.provider.endpoint,
-      timeout: runtime.provider.timeoutMs,
+      apiKey: this.apiKey,
+      baseURL: this.endpoint,
+      timeout: this.timeoutMs,
       maxRetries: runtime.provider.maxRetries,
       ...(maybeBifrostHeaders ? { defaultHeaders: maybeBifrostHeaders } : {}),
     });
@@ -36,10 +62,10 @@ export class OpenAIProvider implements ModelProvider {
   }
 
   async analyze(ev: StructuredEvidence): Promise<ModelAnalysis> {
-    const runtime = getOptionalRuntimeConfig();
+    const runtime = resolveOptionalRuntimeConfig();
     const startedAt = Date.now();
     const response = await this.client.chat.completions.create({
-      model: runtime.provider.modelName,
+      model: this.modelName ?? runtime.provider.modelName,
       temperature: runtime.provider.temperature,
       response_format: { type: "json_object" },
       messages: [
@@ -49,11 +75,52 @@ export class OpenAIProvider implements ModelProvider {
     });
     const content = response.choices[0]?.message?.content ?? "{}";
     const parsed = JSON.parse(content) as ModelAnalysis;
-    return { ...parsed, providerUsed: `${this.id}:${runtime.provider.modelName}`, generationMs: Date.now() - startedAt };
+    return { ...parsed, providerUsed: `${this.id}:${this.modelName ?? runtime.provider.modelName}`, generationMs: Date.now() - startedAt };
+  }
+
+  async preflightGenerate(): Promise<string> {
+    const runtime = resolveOptionalRuntimeConfig();
+    const model = this.modelName ?? runtime.provider.modelName;
+    const response = await this.client.chat.completions.create({
+      model,
+      temperature: 0,
+      max_tokens: 4,
+      messages: [
+        { role: "system", content: "Reply with OK only." },
+        { role: "user", content: "Reply OK." },
+      ],
+    });
+    return response.choices[0]?.message?.content?.trim() ?? "";
+  }
+
+  async authorManualSection(input: ManualAuthoringProviderInput): Promise<ManualAuthoringProviderResult> {
+    const runtime = resolveOptionalRuntimeConfig();
+    const model = this.modelName ?? runtime.provider.modelName;
+    const startedAt = Date.now();
+    const response = await this.client.chat.completions.create({
+      model,
+      temperature: runtime.provider.temperature,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a senior technical manual writer. Produce concrete, novice-readable markdown inside valid JSON only.",
+        },
+        { role: "user", content: buildManualAuthoringPrompt(input) },
+      ],
+    });
+    const content = response.choices[0]?.message?.content ?? "{}";
+    const parsed = JSON.parse(content) as { body?: unknown };
+    const body = typeof parsed.body === "string" ? parsed.body.trim() : "";
+    if (!body) {
+      throw new Error(`Provider ${this.id} returned an empty manual body.`);
+    }
+    return { body, providerUsed: `${this.id}:${model}`, generationMs: Date.now() - startedAt };
   }
 
   async embed(text: string): Promise<number[]> {
-    const runtime = getOptionalRuntimeConfig();
+    const runtime = resolveOptionalRuntimeConfig();
     const response = await this.client.embeddings.create({
       model: runtime.embedding.modelName || "text-embedding-3-small",
       input: text,

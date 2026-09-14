@@ -1,36 +1,53 @@
-// @ts-nocheck
+import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { logToolEvent, resolveTraceId } from "../lib/logger.js";
 import { throwAsMcpToolError } from "../lib/mcp-error.js";
+import { registerAssembleManualTool } from "./assemble-manual.js";
 import { registerExportManualPdfTool } from "./export-manual-pdf.js";
 import { registerExportHelpCenterContentTool } from "./export-help-center-content.js";
+import { registerGenerateGapReportTool } from "./generate-gap-report.js";
 import { registerGenerateReleaseChangelogTool } from "./generate-release-changelog.js";
 import { registerPackageManualTool } from "./package-manual.js";
 import { registerPublishPrCommentTool } from "./publish-pr-comment.js";
+import { registerProbeApplicationTool } from "./probe-application.js";
 import { registerRunAutonomousDocumentationTriggerTool } from "./run-autonomous-documentation-trigger.js";
+import { registerSynthesizeMissingContentTool } from "./synthesize-missing-content.js";
 import { registerSyncManualToLocalDocsTool } from "./sync-manual-to-local-docs.js";
+
+type ToolCallResult = {
+    content: Array<{ type: string; text: string }>;
+};
+
+type ToolHandler = (input: unknown) => Promise<ToolCallResult>;
+
 class InMemoryToolHost {
-    handlers = new Map();
-    tool(name, _description, _schema, handler) {
+    readonly handlers = new Map<string, ToolHandler>();
+
+    tool(name: string, _description: string, _schema: unknown, handler: ToolHandler) {
         this.handlers.set(name, handler);
     }
 }
-function parseToolText(result) {
+
+function parseToolText<T>(result: ToolCallResult): T {
     const first = result.content[0];
     if (!first || first.type !== "text") {
         throw new Error("Tool did not return a text payload.");
     }
-    return JSON.parse(first.text);
+    return JSON.parse(first.text) as T;
 }
-function defaultPdfPath(releaseVersion) {
+
+function defaultPdfPath(releaseVersion: string): string {
     return `artifacts/manual-${releaseVersion}.pdf`;
 }
-export function registerRunReleaseDocumentationPipelineTool(server) {
+
+export function registerRunReleaseDocumentationPipelineTool(server: McpServer) {
     server.tool("run_release_documentation_pipeline", "Runs release-tag documentation automation: capture, changelog, package, PDF export, local sync, and optional PR comment posting.", {
         projectId: z.string(),
         releaseVersion: z.string().min(1),
         repoPath: z.string().optional(),
         mode: z.enum(["staged", "last_commit", "working_tree"]).default("last_commit"),
+        probeBeforePackage: z.boolean().default(false),
+        probeMaxFeatures: z.number().int().min(1).max(50).optional(),
         prUrl: z.string().url().optional(),
         audience: z.enum(["user", "admin", "both"]).default("both"),
         packageFormat: z.enum(["notion_page", "markdown"]).default("notion_page"),
@@ -38,7 +55,7 @@ export function registerRunReleaseDocumentationPipelineTool(server) {
         localDocsOutputPath: z.string().default("docs/MANUAL.md"),
         helpCenterOutputPath: z.string().optional(),
         traceId: z.string().optional(),
-    }, async ({ projectId, releaseVersion, repoPath, mode, prUrl, audience, packageFormat, pdfOutputPath, localDocsOutputPath, helpCenterOutputPath, traceId: incomingTraceId, }) => {
+    }, async ({ projectId, releaseVersion, repoPath, mode, probeBeforePackage, probeMaxFeatures, prUrl, audience, packageFormat, pdfOutputPath, localDocsOutputPath, helpCenterOutputPath, traceId: incomingTraceId, }) => {
         const traceId = resolveTraceId(incomingTraceId);
         const startedAt = Date.now();
         logToolEvent({
@@ -47,25 +64,37 @@ export function registerRunReleaseDocumentationPipelineTool(server) {
             stage: "start",
             traceId,
             message: "Running release documentation pipeline",
-            data: { projectId, releaseVersion, mode, audience, packageFormat, prUrl: prUrl ?? null },
+            data: { projectId, releaseVersion, mode, audience, packageFormat, prUrl: prUrl ?? null, probeBeforePackage },
         });
         try {
+            if (probeBeforePackage && !repoPath) {
+                throw new Error("repoPath is required when probeBeforePackage is true.");
+            }
             const host = new InMemoryToolHost();
-            registerRunAutonomousDocumentationTriggerTool(host);
-            registerGenerateReleaseChangelogTool(host);
-            registerPackageManualTool(host);
-            registerExportManualPdfTool(host);
-            registerSyncManualToLocalDocsTool(host);
-            registerExportHelpCenterContentTool(host);
-            registerPublishPrCommentTool(host);
+            const hostServer = host as unknown as McpServer;
+            registerRunAutonomousDocumentationTriggerTool(hostServer);
+            registerProbeApplicationTool(hostServer);
+            registerGenerateGapReportTool(hostServer);
+            registerSynthesizeMissingContentTool(hostServer);
+            registerGenerateReleaseChangelogTool(hostServer);
+            registerAssembleManualTool(hostServer);
+            registerPackageManualTool(hostServer);
+            registerExportManualPdfTool(hostServer);
+            registerSyncManualToLocalDocsTool(hostServer);
+            registerExportHelpCenterContentTool(hostServer);
+            registerPublishPrCommentTool(hostServer);
             const runTrigger = host.handlers.get("run_autonomous_documentation_trigger");
+            const probeApplication = host.handlers.get("probe_application");
+            const generateGapReport = host.handlers.get("generate_gap_report");
+            const synthesizeMissingContent = host.handlers.get("synthesize_missing_content");
             const generateChangelog = host.handlers.get("generate_release_changelog");
+            const assembleManual = host.handlers.get("assemble_manual");
             const packageManual = host.handlers.get("package_manual");
             const exportPdf = host.handlers.get("export_manual_pdf");
             const syncLocalDocs = host.handlers.get("sync_manual_to_local_docs");
             const exportHelpCenter = host.handlers.get("export_help_center_content");
             const publishPrComment = host.handlers.get("publish_pr_comment");
-            if (!runTrigger || !generateChangelog || !packageManual || !exportPdf || !syncLocalDocs || !exportHelpCenter || !publishPrComment) {
+            if (!runTrigger || !probeApplication || !generateGapReport || !synthesizeMissingContent || !generateChangelog || !assembleManual || !packageManual || !exportPdf || !syncLocalDocs || !exportHelpCenter || !publishPrComment) {
                 throw new Error("Release pipeline could not resolve required tool handlers.");
             }
             const triggerResult = parseToolText(await runTrigger({
@@ -78,9 +107,51 @@ export function registerRunReleaseDocumentationPipelineTool(server) {
                 releaseVersion,
                 traceId,
             }));
+            const retrospectiveProbe = probeBeforePackage
+                ? await (async () => {
+                    const probeResult = parseToolText<{
+                        inventory: {
+                            fileCount: number;
+                            features: Array<{ featureKey: string }>;
+                        };
+                    }>(await probeApplication({ repoPath, traceId }));
+                    const gapResult = parseToolText<{
+                        gapReport: {
+                            totalDiscovered: number;
+                            documentedCount: number;
+                            missingCount: number;
+                            gaps: unknown[];
+                        };
+                    }>(await generateGapReport({ projectId, inventory: probeResult.inventory, traceId }));
+                    const synthesisResult = parseToolText<{
+                        synthesizedCount: number;
+                        results: Array<{ featureKey: string }>;
+                    }>(await synthesizeMissingContent({
+                        projectId,
+                        repoPath,
+                        gapReport: gapResult.gapReport,
+                        maxFeatures: probeMaxFeatures,
+                        traceId,
+                    }));
+
+                    return {
+                        enabled: true,
+                        fileCount: probeResult.inventory.fileCount,
+                        totalDiscovered: gapResult.gapReport.totalDiscovered,
+                        documentedCount: gapResult.gapReport.documentedCount,
+                        missingCount: gapResult.gapReport.missingCount,
+                        synthesizedCount: synthesisResult.synthesizedCount,
+                        synthesizedFeatureKeys: synthesisResult.results.map((result) => result.featureKey),
+                    };
+                })()
+                : { enabled: false };
             const changelogResult = parseToolText(await generateChangelog({
                 projectId,
                 releaseVersion,
+                traceId,
+            }));
+            const assembleResult = parseToolText(await assembleManual({
+                projectId,
                 traceId,
             }));
             const packageResult = parseToolText(await packageManual({
@@ -143,7 +214,9 @@ export function registerRunReleaseDocumentationPipelineTool(server) {
                             projectId,
                             releaseVersion,
                             trigger: triggerResult,
+                            retrospectiveProbe,
                             changelog: changelogResult,
+                            assemble: assembleResult,
                             package: packageResult,
                             pdf: pdfResult,
                             sync: syncResult,

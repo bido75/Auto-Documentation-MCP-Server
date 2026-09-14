@@ -9,10 +9,10 @@ export class AuthStatusBarController implements vscode.Disposable {
     private readonly auth: AuthManager,
     private readonly openAuthPage: () => void,
   ) {
-    this.statusItem.command = { command: "autoDocMcp.openAuth", arguments: [true] };
+    this.statusItem.command = { command: "autoDocMcp.openAuth", title: "Open Auto-Doc login page", arguments: [true] };
     this.statusItem.tooltip = "Open the Auto-Doc login page";
 
-    this.actionItem.command = { command: "autoDocMcp.openAuth", arguments: [true] };
+    this.actionItem.command = { command: "autoDocMcp.openAuth", title: "Open Auto-Doc login page", arguments: [true] };
     this.actionItem.tooltip = "Open the Auto-Doc login page";
   }
 
@@ -28,7 +28,7 @@ export class AuthStatusBarController implements vscode.Disposable {
     this.actionItem.text = hasToken
       ? "$(edit) Update token"
       : "$(sign-in) Change token";
-    this.actionItem.command = { command: "autoDocMcp.openAuth", arguments: [true] };
+    this.actionItem.command = { command: "autoDocMcp.openAuth", title: "Open Auto-Doc login page", arguments: [true] };
     this.actionItem.tooltip = hasToken
       ? "Open the Auto-Doc login page to update the stored token"
       : "Open the Auto-Doc login page to add a token";

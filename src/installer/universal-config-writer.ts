@@ -1,31 +1,119 @@
-// @ts-nocheck
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import YAML from "yaml";
-import { isMap, isScalar, isSeq, YAMLMap, YAMLSeq } from "yaml";
 import { TOKEN_PLACEHOLDER } from "./token-store.js";
-import { validators } from "../validation/index.js";
+
+type JsonRecord = Record<string, unknown>;
+type ValidatorName = "genericMcp" | "openCode" | "goose" | "zed" | "vscodeMcp" | "continueYaml" | "amazonQ";
+type Validator = (input: JsonRecord) => void;
+type ToolConfig = {
+    tool: string;
+    pattern: "mcp-config" | "plugin-config";
+    configPath: string;
+    format: "mcpServers" | "mcp" | "goose-yaml" | "zed" | "custom";
+    platform?: NodeJS.Platform;
+    validator?: ValidatorName;
+    generateFn?: (serverPath: string) => string;
+};
+type WriteToolResult = { tool: string; status: "not-installed" | "configured" | "error"; error?: string };
+type McpStdioEntry = {
+    command: string;
+    args: string[];
+    env: { NOTION_TOKEN: string };
+};
+type GooseConfig = {
+    extensions: Array<{
+        name: string;
+        type: string;
+        cmd: string;
+        args: string[];
+        env?: Record<string, string>;
+        enabled: boolean;
+    }>;
+};
+type ContinueWorkspaceConfig = {
+    mcpServers: Array<{
+        name: string;
+        type: string;
+        command: string;
+        args: string[];
+        env: Record<string, string>;
+    }>;
+};
+
 const HOME = os.homedir();
 const PLATFORM = process.platform;
-const MCP_STDIO_ENTRY = (serverPath) => ({
+const MCP_STDIO_ENTRY = (serverPath: string): McpStdioEntry => ({
     command: "node",
     args: [serverPath],
     env: {
         NOTION_TOKEN: TOKEN_PLACEHOLDER,
     },
 });
-export function validateMcpServersConfig(input) {
+
+function requireRecord(value: unknown, message: string): JsonRecord {
+    const record = asRecord(value);
+    if (!record) {
+        throw new Error(message);
+    }
+    return record;
+}
+
+function validateMcpEntry(value: unknown): void {
+    const entry = requireRecord(value, "MCP server entry must be an object.");
+    if (entry.command !== "node") {
+        throw new Error("MCP server entry command must be node.");
+    }
+    if (!Array.isArray(entry.args) || entry.args.some((arg) => typeof arg !== "string")) {
+        throw new Error("MCP server entry args must be strings.");
+    }
+}
+
+const validators: Record<ValidatorName, Validator> = {
+    genericMcp(input) {
+        const servers = requireRecord(input.mcpServers, "mcpServers must be an object.");
+        validateMcpEntry(servers["auto-doc-mcp"]);
+    },
+    openCode(input) {
+        const mcp = requireRecord(input.mcp, "mcp must be an object.");
+        const servers = requireRecord(mcp.servers, "mcp.servers must be an object.");
+        validateMcpEntry(servers["auto-doc-mcp"]);
+    },
+    amazonQ(input) {
+        validators.genericMcp(input);
+    },
+    goose(input) {
+        if (!Array.isArray(input.extensions)) {
+            throw new Error("Goose config extensions must be an array.");
+        }
+    },
+    zed(input) {
+        const contextServers = requireRecord(input.context_servers, "context_servers must be an object.");
+        requireRecord(contextServers["auto-doc-mcp"], "auto-doc-mcp context server must be an object.");
+    },
+    vscodeMcp(input) {
+        const servers = requireRecord(input.servers, "servers must be an object.");
+        requireRecord(servers["auto-doc-mcp"], "auto-doc-mcp VS Code server must be an object.");
+    },
+    continueYaml(input) {
+        if (!Array.isArray(input.mcpServers)) {
+            throw new Error("Continue config mcpServers must be an array.");
+        }
+    },
+};
+
+export function validateMcpServersConfig(input: JsonRecord): void {
     return validators.genericMcp(input);
 }
-function buildMcpServersConfig(serverPath) {
+function buildMcpServersConfig(serverPath: string): { mcpServers: Record<string, McpStdioEntry> } {
     return {
         mcpServers: {
             "auto-doc-mcp": MCP_STDIO_ENTRY(serverPath),
         },
     };
 }
-export const TOOL_CONFIGS = [
+export const TOOL_CONFIGS: ToolConfig[] = [
     {
         tool: "Cursor",
         pattern: "mcp-config",
@@ -135,8 +223,8 @@ export const TOOL_CONFIGS = [
         generateFn: (serverPath) => `[language-server.auto-doc-mcp]\ncommand = "node"\nargs = ["${serverPath}"]\nenvironment = { NOTION_TOKEN = "${TOKEN_PLACEHOLDER}" }\n`,
     },
 ];
-export async function writeToAllDetectedTools(serverPath, projectPath) {
-    const results = [];
+export async function writeToAllDetectedTools(serverPath: string, projectPath?: string): Promise<WriteToolResult[]> {
+    const results: WriteToolResult[] = [];
     for (const config of TOOL_CONFIGS) {
         if (config.platform && config.platform !== PLATFORM) {
             continue;
@@ -166,7 +254,7 @@ export async function writeToAllDetectedTools(serverPath, projectPath) {
     }
     return results;
 }
-export async function writeConfigForTool(config, serverPath) {
+export async function writeConfigForTool(config: ToolConfig, serverPath: string): Promise<void> {
     if (config.generateFn) {
         const content = config.generateFn(serverPath);
         await fs.mkdir(path.dirname(config.configPath), { recursive: true });
@@ -228,7 +316,7 @@ export async function writeConfigForTool(config, serverPath) {
         return;
     }
 }
-export async function writeWorkspaceConfigs(projectPath, serverPath) {
+export async function writeWorkspaceConfigs(projectPath: string, serverPath: string): Promise<void> {
     await mergeJsonConfig(path.join(projectPath, ".mcp.json"), (existing) => ({
         ...existing,
         mcpServers: {
@@ -255,10 +343,10 @@ export async function writeWorkspaceConfigs(projectPath, serverPath) {
     resolveValidator("continueYaml")(asRecord(parsedMerged) ?? {});
     await fs.writeFile(continueConfigPath, mergedContinueYaml, "utf8");
 }
-export async function writeWorkspaceMcpJson(projectPath, serverPath) {
+export async function writeWorkspaceMcpJson(projectPath: string, serverPath: string): Promise<void> {
     await writeWorkspaceConfigs(projectPath, serverPath);
 }
-async function mergeJsonConfig(filePath, mergeFn, validator) {
+async function mergeJsonConfig(filePath: string, mergeFn: (existing: JsonRecord) => JsonRecord, validator?: Validator): Promise<void> {
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     const existing = await readJsonOrDefault(filePath);
     const merged = mergeFn(existing);
@@ -267,10 +355,10 @@ async function mergeJsonConfig(filePath, mergeFn, validator) {
     }
     await fs.writeFile(filePath, JSON.stringify(merged, null, 2), "utf8");
 }
-function resolveValidator(name) {
+function resolveValidator(name: ValidatorName): Validator {
     return validators[name];
 }
-function buildGooseConfig(serverPath) {
+function buildGooseConfig(serverPath: string): GooseConfig {
     return {
         extensions: [
             {
@@ -286,7 +374,7 @@ function buildGooseConfig(serverPath) {
         ],
     };
 }
-function buildContinueWorkspaceConfig(serverPath) {
+function buildContinueWorkspaceConfig(serverPath: string): ContinueWorkspaceConfig {
     return {
         mcpServers: [
             {
@@ -301,60 +389,23 @@ function buildContinueWorkspaceConfig(serverPath) {
         ],
     };
 }
-function mergeContinueWorkspaceYaml(existingYaml, generated) {
+function mergeContinueWorkspaceYaml(existingYaml: string, generated: ContinueWorkspaceConfig): string {
     const desired = generated.mcpServers[0];
-    const createAutoDocServer = () => {
-        const server = new YAMLMap();
-        server.set("name", desired.name);
-        server.set("type", desired.type ?? "stdio");
-        server.set("command", desired.command);
-        server.set("args", desired.args ?? []);
-        const env = new YAMLMap();
-        env.set("NOTION_TOKEN", TOKEN_PLACEHOLDER);
-        server.set("env", env);
-        return server;
-    };
+    const createAutoDocServer = () => ({ ...desired, env: { NOTION_TOKEN: TOKEN_PLACEHOLDER } });
     if (existingYaml.trim().length === 0) {
         return YAML.stringify(generated, { indent: 2 });
     }
-    const doc = YAML.parseDocument(existingYaml);
-    if (doc.errors.length > 0 || !doc.contents || !isMap(doc.contents)) {
+    const parsed = YAML.parse(existingYaml);
+    const root = asRecord(parsed);
+    if (!root) {
         return YAML.stringify(generated, { indent: 2 });
     }
-    const root = doc.contents;
-    let mcpServersNode = root.get("mcpServers", true);
-    let mcpServers;
-    if (isSeq(mcpServersNode)) {
-        mcpServers = mcpServersNode;
-    }
-    else {
-        mcpServers = new YAMLSeq();
-        root.set("mcpServers", mcpServers);
-    }
-    const autoDocNode = mcpServers.items.find((item) => {
-        if (!isMap(item)) {
-            return false;
-        }
-        const nameNode = item.get("name", true);
-        return isScalar(nameNode) && nameNode.value === desired.name;
-    });
-    if (!autoDocNode || !isMap(autoDocNode)) {
-        mcpServers.items.push(createAutoDocServer());
-        return doc.toString({ indent: 2 });
-    }
-    autoDocNode.set("name", desired.name);
-    autoDocNode.set("type", desired.type ?? "stdio");
-    autoDocNode.set("command", desired.command);
-    autoDocNode.set("args", desired.args ?? []);
-    let envNode = autoDocNode.get("env", true);
-    const envMap = isMap(envNode) ? envNode : new YAMLMap();
-    if (!isMap(envNode)) {
-        autoDocNode.set("env", envMap);
-    }
-    envMap.set("NOTION_TOKEN", TOKEN_PLACEHOLDER);
-    return doc.toString({ indent: 2 });
+    const existingServers = Array.isArray(root.mcpServers) ? root.mcpServers.filter((item) => asRecord(item)) : [];
+    const withoutAutoDoc = existingServers.filter((item) => asRecord(item)?.name !== desired.name);
+    root.mcpServers = [...withoutAutoDoc, createAutoDocServer()];
+    return YAML.stringify(root, { indent: 2 });
 }
-function renderGooseConfig(config) {
+function renderGooseConfig(config: GooseConfig): string {
     const extension = config.extensions[0];
     const envLine = extension.env
         ? [
@@ -374,7 +425,7 @@ function renderGooseConfig(config) {
         "",
     ].join("\n");
 }
-async function readJsonOrDefault(filePath) {
+async function readJsonOrDefault(filePath: string): Promise<JsonRecord> {
     try {
         const raw = await fs.readFile(filePath, "utf8");
         const parsed = JSON.parse(raw);
@@ -384,7 +435,7 @@ async function readJsonOrDefault(filePath) {
         return {};
     }
 }
-async function readFileOrDefault(filePath, fallback) {
+async function readFileOrDefault(filePath: string, fallback: string): Promise<string> {
     try {
         return await fs.readFile(filePath, "utf8");
     }
@@ -392,7 +443,7 @@ async function readFileOrDefault(filePath, fallback) {
         return fallback;
     }
 }
-async function directoryExists(dirPath) {
+async function directoryExists(dirPath: string): Promise<boolean> {
     try {
         await fs.access(dirPath);
         return true;
@@ -401,8 +452,8 @@ async function directoryExists(dirPath) {
         return false;
     }
 }
-function asRecord(value) {
+function asRecord(value: unknown): JsonRecord | undefined {
     return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value
+        ? (value as JsonRecord)
         : undefined;
 }

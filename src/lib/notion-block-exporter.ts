@@ -1,8 +1,34 @@
-// @ts-nocheck
 import { withNotionRetry } from "./notion-retry.js";
-export async function fetchAllBlocks(notion, blockId) {
-    const results = [];
-    let cursor;
+
+type RichTextPart = { plain_text?: string; text?: { content?: string } };
+type BlockChildrenListResponse = { results: NotionBlock[]; has_more?: boolean; next_cursor?: string | null };
+type NotionBlock = {
+    id: string;
+    type: string;
+    has_children?: boolean;
+    _children?: NotionBlock[];
+    heading_1?: { rich_text?: RichTextPart[] };
+    heading_2?: { rich_text?: RichTextPart[] };
+    heading_3?: { rich_text?: RichTextPart[] };
+    paragraph?: { rich_text?: RichTextPart[] };
+    bulleted_list_item?: { rich_text?: RichTextPart[] };
+    numbered_list_item?: { rich_text?: RichTextPart[] };
+    code?: { rich_text?: RichTextPart[]; language?: string };
+    callout?: { rich_text?: RichTextPart[]; icon?: { emoji?: string } };
+    quote?: { rich_text?: RichTextPart[] };
+    toggle?: { rich_text?: RichTextPart[] };
+};
+type NotionBlockClient = {
+    blocks: {
+        children: {
+            list(input: { block_id: string; page_size: number; start_cursor?: string }): Promise<BlockChildrenListResponse>;
+        };
+    };
+};
+
+export async function fetchAllBlocks(notion: NotionBlockClient, blockId: string): Promise<NotionBlock[]> {
+    const results: NotionBlock[] = [];
+    let cursor: string | undefined;
     do {
         const payload = {
             block_id: blockId,
@@ -12,7 +38,7 @@ export async function fetchAllBlocks(notion, blockId) {
         const page = (await withNotionRetry(() => notion.blocks.children.list(payload), {
             operationName: "blocks.children.list",
             payload,
-        }));
+        })) as BlockChildrenListResponse;
         results.push(...page.results);
         cursor = page.has_more ? page.next_cursor ?? undefined : undefined;
     } while (cursor);
@@ -23,9 +49,9 @@ export async function fetchAllBlocks(notion, blockId) {
     }
     return results;
 }
-export function blocksToMarkdown(blocks, depth = 0) {
+export function blocksToMarkdown(blocks: NotionBlock[], depth = 0): string {
     const indent = "  ".repeat(depth);
-    const rich = (parts) => parts?.map((part) => part.plain_text ?? part.text?.content ?? "").join("") ?? "";
+    const rich = (parts?: RichTextPart[]) => parts?.map((part) => part.plain_text ?? part.text?.content ?? "").join("") ?? "";
     return blocks
         .map((block) => {
         switch (block.type) {

@@ -24,6 +24,15 @@ export interface ManualEntryDraft {
   body: string;
   routes?: string[];
   apiEndpoints?: string[];
+  figures?: ManualFigure[];
+}
+
+export interface ManualFigure {
+  url?: string;
+  artifactPath?: string;
+  caption: string;
+  altText?: string;
+  visualId?: string;
 }
 
 export interface DocumentationCandidate {
@@ -40,6 +49,8 @@ export interface DocumentationCandidate {
 export type AnalyzeFallbackReasonCode =
   | "none"
   | "no_usable_evidence"
+  | "provider_output_invalid"
+  | "analyzer_exception"
   | "analyzer_exception_fallback_persisted"
   | "analyzer_exception_fallback_persist_failed";
 
@@ -51,4 +62,21 @@ export interface AnalyzeDocumentationCandidateResult extends DocumentationCandid
   fallbackReasonCode: AnalyzeFallbackReasonCode;
   dedupeDecision?: string;
   matchedExistingFeatureKey?: string | null;
+  generatedNarratives?: {
+    providerUsed: string;
+    userGuide: {
+      summary: string;
+      steps: string[];
+      expectedOutcome: string;
+      possibleErrors: string[];
+    };
+    adminGuide: {
+      configRequired: string[];
+      endpointsAffected: string[];
+      envVarsRequired: string[];
+      verificationSteps: string[];
+      troubleshooting: string[];
+    };
+    developerNotes?: string;
+  };
 }
