@@ -20,6 +20,8 @@ type ComposeService = {
   command?: string[];
   environment?: Record<string, string>;
   ports?: string[];
+  restart?: string;
+  depends_on?: Record<string, { condition?: string }>;
 };
 
 type ComposeFile = {
@@ -98,12 +100,43 @@ describe("fix-deployment-config-coherence", () => {
     });
   });
 
-  it("bifrost gateway avoids the common localhost 8080 host-port collision", async () => {
+  it("keeps Bifrost private to the Docker network to avoid host-port collisions", async () => {
     const compose = await composeFile();
     const bifrost = compose.services["bifrost-gateway"];
     expect(bifrost).toBeDefined();
-    expect(bifrost.ports).toContain("127.0.0.1:8081:8080");
-    expect(bifrost.ports).not.toContain("8080:8080");
+    expect(bifrost.ports).toBeUndefined();
+  });
+
+  it("orders healthy origins before nginx and cloudflared", async () => {
+    const compose = await composeFile();
+    const cloudflared = compose.services.cloudflared;
+    const nginx = compose.services.nginx;
+    expect(cloudflared).toBeDefined();
+    expect(cloudflared.profiles).toEqual(["self-hosted"]);
+    expect(cloudflared.restart).toBe("unless-stopped");
+    expect(cloudflared.depends_on).toMatchObject({
+      nginx: { condition: "service_started" },
+      "notion-auto-doc": { condition: "service_healthy" },
+    });
+    expect(nginx.depends_on).toMatchObject({
+      "bifrost-gateway": { condition: "service_healthy" },
+      "notion-auto-doc": { condition: "service_healthy" },
+    });
+  });
+
+  it("bundles Linux and Windows boot launchers that include the self-hosted profile", async () => {
+    const systemdUnit = await text("deploy/systemd/auto-doc-mcp.service");
+    const linuxInstaller = await text("deploy/systemd/install.sh");
+    const windowsLauncher = await text("scripts/start-self-hosted.ps1");
+    const windowsInstaller = await text("scripts/register-windows-autostart.ps1");
+
+    expect(systemdUnit).toContain("docker compose --profile self-hosted up -d");
+    expect(systemdUnit).toContain("WantedBy=multi-user.target");
+    expect(linuxInstaller).toContain("systemctl enable --now auto-doc-mcp.service");
+    expect(windowsLauncher).toContain("docker compose --profile self-hosted up -d");
+    expect(windowsLauncher).toContain("CLOUDFLARE_TUNNEL_TOKEN");
+    expect(windowsLauncher).toContain('ContainerName "bifrost-gateway" -ExpectedState "healthy"');
+    expect(windowsInstaller).toContain("New-ScheduledTaskTrigger -AtLogOn");
   });
 
   it("autonomous orchestrator is wired through the capture analyze upsert publish pipeline", async () => {

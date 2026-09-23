@@ -1,0 +1,18 @@
+[Unit]
+Description=Auto-Doc MCP self-hosted stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/auto-doc-mcp
+ExecStartPre=/usr/bin/docker compose --profile self-hosted config --quiet
+ExecStart=/usr/bin/docker compose --profile self-hosted up -d --remove-orphans
+ExecStop=/usr/bin/docker compose --profile self-hosted stop
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

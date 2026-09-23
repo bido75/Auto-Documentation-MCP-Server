@@ -43,6 +43,33 @@ curl http://localhost:3000/health
 
 Expected result: HTTP `200` and a JSON health response.
 
+The `self-hosted` profile is required. A plain `docker compose up -d` does not
+include the bridge, Bifrost, or Cloudflare Tunnel services.
+
+### Start automatically after a reboot
+
+On a Linux host installed at `/opt/auto-doc-mcp`, install the bundled systemd
+unit after `.env` contains `CLOUDFLARE_TUNNEL_TOKEN`:
+
+```bash
+cd /opt/auto-doc-mcp
+sudo sh deploy/systemd/install.sh
+```
+
+The unit explicitly starts the `self-hosted` profile. Docker's
+`restart: unless-stopped` policy then restarts individual containers after a
+daemon restart or container failure.
+
+On Windows with Docker Desktop, register the current-user logon task:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/register-windows-autostart.ps1
+Start-ScheduledTask -TaskName "Auto-Doc MCP Self-Hosted Stack"
+```
+
+The Windows launcher waits for Docker Desktop, starts the full profile, and
+fails loudly if the tunnel token is missing or the connector is not running.
+
 ## Expose Externally
 
 For remote IDEs or GitHub Actions, expose the bridge through a secure tunnel such as Cloudflare Tunnel.

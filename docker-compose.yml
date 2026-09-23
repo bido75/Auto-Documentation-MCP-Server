@@ -164,8 +164,6 @@ services:
     image: maximhq/bifrost:v1.5.6
     container_name: bifrost-gateway
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:8081:8080"
     volumes:
       - ./bifrost-data:/app/data
       - ./bifrost-config.json:/app/config.json:ro
@@ -207,7 +205,10 @@ services:
     networks:
       - ai-mesh
     depends_on:
-      - bifrost-gateway
+      nginx:
+        condition: service_started
+      notion-auto-doc:
+        condition: service_healthy
 
   tailscale:
     profiles: ["self-hosted"]
@@ -241,8 +242,10 @@ services:
     networks:
       - ai-mesh
     depends_on:
-      - bifrost-gateway
-      - notion-auto-doc
+      bifrost-gateway:
+        condition: service_healthy
+      notion-auto-doc:
+        condition: service_healthy
 
 volumes:
   postgres-data:
