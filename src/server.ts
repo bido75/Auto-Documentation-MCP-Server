@@ -15,7 +15,7 @@ import { checkLicenseGate } from "./lib/license-gate.js";
 
 export const SERVER_METADATA = {
   name: "auto-docs-notion-mcp",
-  version: "0.3.0",
+  version: "0.3.1",
 } as const;
 
 export const REGISTERED_TOOL_NAMES = [

@@ -82,6 +82,8 @@ describe("fix-deployment-config-coherence", () => {
       SELF_DOC_PROJECT_ID: "${SELF_DOC_PROJECT_ID:-}",
       SELF_DOC_REPO_PATH: "${SELF_DOC_REPO_PATH:-}",
       LEMONSQUEEZY_WEBHOOK_SECRET: "${LEMONSQUEEZY_WEBHOOK_SECRET:-}",
+      LEMONSQUEEZY_PRODUCT_ID: "${LEMONSQUEEZY_PRODUCT_ID:-}",
+      LEMONSQUEEZY_VARIANT_ID: "${LEMONSQUEEZY_VARIANT_ID:-}",
       AUTO_DOC_LICENSE_PRIVATE_KEY_PATH: "${AUTO_DOC_LICENSE_PRIVATE_KEY_PATH:-/run/auto-doc-license/license-private.pem}",
     });
     expect(bridge.volumes).toContain("${AUTO_DOC_LICENSE_KEYS_DIR:-./license-keys}:/run/auto-doc-license:ro");

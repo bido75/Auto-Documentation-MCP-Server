@@ -30,7 +30,7 @@ function verifyWebhookSignature(rawBody: Buffer, signature: string, secret: stri
   return timingSafeStringEqual(expected, signature);
 }
 
-async function generateLicenseJwt(input: {
+export async function generateLicenseJwt(input: {
   subscriberEmail: string;
   privateKeyPath: string;
   planMonths?: number;

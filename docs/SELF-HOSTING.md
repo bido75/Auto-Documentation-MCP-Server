@@ -45,11 +45,19 @@ cp /secure/path/license-private.pem license-keys/license-private.pem
 chmod 600 license-keys/license-private.pem
 ```
 
-Set `LEMONSQUEEZY_WEBHOOK_SECRET` in `.env`. The Compose defaults mount
+Set `LEMONSQUEEZY_WEBHOOK_SECRET`, `LEMONSQUEEZY_PRODUCT_ID`, and optionally
+`LEMONSQUEEZY_VARIANT_ID` in `.env`. The Compose defaults mount
 `./license-keys` at `/run/auto-doc-license` and set
 `AUTO_DOC_LICENSE_PRIVATE_KEY_PATH` to the mounted key. To keep keys elsewhere,
 set `AUTO_DOC_LICENSE_KEYS_DIR` to that host directory. The directory and key
 are excluded from both Git and Docker build contexts.
+
+Customers receive Lemon Squeezy's license key in their receipt. They exchange
+it once for the offline-signed Auto-Doc license used by the MCP server:
+
+```bash
+npx auto-doc-mcp license activate --server https://your-mcp-host.example
+```
 
 Start the stack:
 

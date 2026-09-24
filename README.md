@@ -28,6 +28,14 @@ Auto-Doc MCP is MIT licensed and self-hosted. You bring your own Notion integrat
 - Licensed: $3/month maintenance license for AI-backed analysis, probing, synthesis, humanizer, health score, webhooks, package/export, and release automation.
 - Offline validation: the server validates signed license JWTs locally. It does not need to phone home during normal tool use.
 
+After purchase, exchange the Lemon Squeezy key from your receipt once. The
+command stores the resulting offline-signed license in the current project's
+ignored `.env` file:
+
+```bash
+npx auto-doc-mcp license activate --server https://mcp.giscop.com
+```
+
 Production-ready TypeScript MCP server that captures development signals and continuously builds user/admin documentation in Notion.
 
 The local bridge uses HTTP-SSE transport:

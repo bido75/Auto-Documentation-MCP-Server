@@ -18,6 +18,7 @@ import { parseContinuousRunnerTargets } from "../runner/index.js";
 import { buildCandidate, preflightProviderTiers, type ProviderTierPreflightResult } from "../providers/factory.js";
 import { logStartupLicenseStatus } from "../lib/license-gate.js";
 import { handleLemonsqueezyWebhook } from "./webhooks/lemonsqueezy.js";
+import { handleLicenseExchange } from "./license-exchange.js";
 
 const DEFAULT_PORT = 3741;
 const DEFAULT_WEBHOOK_RATE_LIMIT_PER_MINUTE = 60;
@@ -1439,6 +1440,16 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
 
   app.use(express.json({ limit: "1mb" }));
 
+  app.post("/license/exchange", async (req: Request, res: Response) => {
+    const rate = rateLimiter.check(`license-exchange:${resolveClientIdentity(req)}`);
+    if (!rate.allowed) {
+      res.setHeader("Retry-After", String(rate.retryAfterSeconds));
+      res.status(429).json({ ok: false, error: "Rate limit exceeded for license activation." });
+      return;
+    }
+    await handleLicenseExchange(req, res);
+  });
+
   app.get("/health", (_req, res) => {
     res.json({
       status: "running",
@@ -1462,6 +1473,7 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
         githubWebhook: "/webhooks/github",
         aiSessionWebhook: "/webhooks/ai-session",
         lemonsqueezyWebhook: "/webhooks/lemonsqueezy",
+        licenseExchange: "/license/exchange",
         runnerStatus: "/runner/status",
         runnerTrigger: "/runner/trigger",
         startupPreflight: "/startup/preflight",

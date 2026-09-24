@@ -15,6 +15,8 @@ Core tools work without a license. Advanced tools require a signed maintenance l
 - `AUTO_DOC_LICENSE_PUBLIC_KEY`: Optional override for the bundled offline-validation public key. Use `\n` escapes for multiline PEM values.
 - `AUTO_DOC_LICENSE_PUBLIC_KEY_FILE`: Optional file-based public-key override for rotation or private distributions.
 - `LEMONSQUEEZY_WEBHOOK_SECRET`: Server-side webhook secret for verified Lemon Squeezy events.
+- `LEMONSQUEEZY_PRODUCT_ID`: Required product identity for license exchange. Keys for other products are rejected.
+- `LEMONSQUEEZY_VARIANT_ID`: Optional plan/variant identity for stricter license exchange.
 - `AUTO_DOC_LICENSE_PRIVATE_KEY_PATH`: Server-side private key path for license issuance. Never commit the private key.
 
 ## HTTP Bridge
