@@ -68,7 +68,7 @@ npm run dev
 - `RUN_LIVE_NOTION_TESTS=true` to enable env-gated live tests
 - `BIFROST_VIRTUAL_KEY` for Bifrost-backed AI calls when the provider is `bifrost`
 - `AUTO_DOC_LICENSE_KEY` enables the licensed advanced feature set
-- `AUTO_DOC_LICENSE_PUBLIC_KEY` or `AUTO_DOC_LICENSE_PUBLIC_KEY_FILE` provides the public key used for offline license validation
+- License validation uses the bundled public key by default; `AUTO_DOC_LICENSE_PUBLIC_KEY` or `AUTO_DOC_LICENSE_PUBLIC_KEY_FILE` can override it during key rotation
 - `AUTO_DOC_BRIDGE_API_KEY` for HTTP-SSE bridge access; required to open `/sse`, `/runner/status`, and `/runner/trigger`
 - `AUTO_DOC_RUNNER_PROJECT_ID` and `AUTO_DOC_RUNNER_REPO_PATH` to enable the continuous runner
 - `AUTO_DOC_RUNNER_TARGETS` to configure multiple runner targets in one JSON payload

@@ -39,6 +39,15 @@ const CACHE_TTL_MS = 60 * 60 * 1000;
 const GRACE_PERIOD_DAYS = 7;
 const LICENSE_STORE = "auto-doc-mcp";
 const LICENSE_PLAN: LicensePlan = "maintenance";
+const DEFAULT_LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0O1j+8+kkz07DkZWmXE/
+gjHo/FbiD/FlceMp+IMkcbDf/NHjiVXIrxFwVgcoqtC6++q9GEub/ZdnzIgdMyJ7
+j608IzXJlvAqBEU8W2u59nstA6lmzEvRA2ePqH3/bqQw4qCf1SBYuN47WTqKlg1h
+eNTG6Lckprw7A6nWDEYcRj/01X2rB59sXcFMj19OrheYW/ifz0sUDcHjzFDo6INe
+0AeUvncCpizheKcdjl5299d8oODDtDWW5YhmU6eonY6OeBf0HzvBmDOSw1/Qhh/C
+7yYOvS5lPikswTBSnfHVl7N9J3oLgJ/N8CqXd56ExAe8CzY1pXb9l0F7NjHEPdBX
+EQIDAQAB
+-----END PUBLIC KEY-----`;
 
 const FREE_TOOLS = new Set([
   "initialize_project_manual",
@@ -69,11 +78,11 @@ function readLicensePublicKey(env: NodeJS.ProcessEnv): string | null {
   }
 
   const filePath = env.AUTO_DOC_LICENSE_PUBLIC_KEY_FILE?.trim();
-  if (!filePath) {
-    return null;
+  if (filePath) {
+    return readFileSync(filePath, "utf8");
   }
 
-  return readFileSync(filePath, "utf8");
+  return DEFAULT_LICENSE_PUBLIC_KEY;
 }
 
 function parsePayload(payloadSegment: string): LicensePayload | null {
@@ -214,6 +223,6 @@ export function buildLicenseNagMessage(input?: { toolName?: string; reason?: str
     "Licensed tools include AI-backed analysis, probing, synthesis, humanizer, health score, webhooks, packaging, and exports.",
     "",
     "Plan: $3/month maintenance license. You bring your own Notion token and AI provider key.",
-    "Add AUTO_DOC_LICENSE_KEY to your environment or .env file, and configure AUTO_DOC_LICENSE_PUBLIC_KEY or AUTO_DOC_LICENSE_PUBLIC_KEY_FILE.",
+    "Add AUTO_DOC_LICENSE_KEY to your environment or .env file.",
   ].join("\n");
 }

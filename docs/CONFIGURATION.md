@@ -12,8 +12,8 @@ This is the short reference for production operators.
 Core tools work without a license. Advanced tools require a signed maintenance license.
 
 - `AUTO_DOC_LICENSE_KEY`: Signed license JWT.
-- `AUTO_DOC_LICENSE_PUBLIC_KEY`: Public key for offline JWT validation. Use `\n` escapes for multiline PEM values.
-- `AUTO_DOC_LICENSE_PUBLIC_KEY_FILE`: Alternative path to the public PEM file.
+- `AUTO_DOC_LICENSE_PUBLIC_KEY`: Optional override for the bundled offline-validation public key. Use `\n` escapes for multiline PEM values.
+- `AUTO_DOC_LICENSE_PUBLIC_KEY_FILE`: Optional file-based public-key override for rotation or private distributions.
 - `LEMONSQUEEZY_WEBHOOK_SECRET`: Server-side webhook secret for verified Lemon Squeezy events.
 - `AUTO_DOC_LICENSE_PRIVATE_KEY_PATH`: Server-side private key path for license issuance. Never commit the private key.
 

@@ -66,6 +66,15 @@ describe("offline license validation", () => {
     expect(status).toEqual({ valid: false, reason: "invalid_signature" });
   });
 
+  it("uses the bundled public verifier when no key override is configured", () => {
+    const keys = createKeys();
+    const token = signLicense({ privateKey: keys.privateKey });
+
+    const status = getLicenseStatus({ AUTO_DOC_LICENSE_KEY: token });
+
+    expect(status).toEqual({ valid: false, reason: "invalid_signature" });
+  });
+
   it("allows the seven day grace period and rejects licenses after it", () => {
     const keys = createKeys();
     const nowSeconds = 2_000_000;
