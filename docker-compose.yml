@@ -52,6 +52,8 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
+    volumes:
+      - ${AUTO_DOC_LICENSE_KEYS_DIR:-./license-keys}:/run/auto-doc-license:ro
     environment:
       NOTION_TOKEN: ${NOTION_TOKEN:-}
       AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE: ${AUTO_DOC_ALLOW_UNAUTHENTICATED_SSE:-false}
@@ -74,6 +76,8 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost,https://verdent.ai}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       AI_SESSION_WEBHOOK_SECRET: ${AI_SESSION_WEBHOOK_SECRET:-}
+      LEMONSQUEEZY_WEBHOOK_SECRET: ${LEMONSQUEEZY_WEBHOOK_SECRET:-}
+      AUTO_DOC_LICENSE_PRIVATE_KEY_PATH: ${AUTO_DOC_LICENSE_PRIVATE_KEY_PATH:-/run/auto-doc-license/license-private.pem}
       STATE_ENCRYPTION_KEY: ${STATE_ENCRYPTION_KEY:?Set STATE_ENCRYPTION_KEY to a unique high-entropy value before running production services}
       AUTO_DOC_RUNTIME_MODE: bridge
       AUTO_DOC_RUNNER_TARGETS: ${AUTO_DOC_RUNNER_TARGETS:-}

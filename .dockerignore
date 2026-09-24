@@ -9,6 +9,7 @@ coverage
 dist
 packages
 bifrost-data
+license-keys
 bifrost-assets
 cloudflared
 nginx

@@ -21,6 +21,7 @@ type ComposeService = {
   environment?: Record<string, string>;
   ports?: string[];
   restart?: string;
+  volumes?: string[];
   depends_on?: Record<string, { condition?: string }>;
 };
 
@@ -80,7 +81,10 @@ describe("fix-deployment-config-coherence", () => {
       AUTO_DOC_RUNNER_TARGETS: "${AUTO_DOC_RUNNER_TARGETS:-}",
       SELF_DOC_PROJECT_ID: "${SELF_DOC_PROJECT_ID:-}",
       SELF_DOC_REPO_PATH: "${SELF_DOC_REPO_PATH:-}",
+      LEMONSQUEEZY_WEBHOOK_SECRET: "${LEMONSQUEEZY_WEBHOOK_SECRET:-}",
+      AUTO_DOC_LICENSE_PRIVATE_KEY_PATH: "${AUTO_DOC_LICENSE_PRIVATE_KEY_PATH:-/run/auto-doc-license/license-private.pem}",
     });
+    expect(bridge.volumes).toContain("${AUTO_DOC_LICENSE_KEYS_DIR:-./license-keys}:/run/auto-doc-license:ro");
   });
 
   it("self-hosted runner has a real autonomous entrypoint and receives the same target/provider config", async () => {

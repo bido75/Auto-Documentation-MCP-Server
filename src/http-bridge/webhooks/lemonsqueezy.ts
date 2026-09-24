@@ -108,7 +108,16 @@ export async function handleLemonsqueezyWebhook(req: Request, res: Response): Pr
     return;
   }
 
-  const licenseKey = await generateLicenseJwt({ subscriberEmail, privateKeyPath });
+  let licenseKey: string;
+  try {
+    licenseKey = await generateLicenseJwt({ subscriberEmail, privateKeyPath });
+  } catch {
+    res.status(503).json({
+      ok: false,
+      error: "The license signing key is unavailable; license issuance is temporarily disabled.",
+    });
+    return;
+  }
   console.error(`[license] Issued Auto-Doc MCP license for ${subscriberEmail}`);
   res.status(200).json({ ok: true, status: "issued", eventName, licenseKey });
 }

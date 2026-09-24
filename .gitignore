@@ -42,6 +42,7 @@ job-*-logs.zip
 Microsoft/
 bifrost-assets/
 bifrost-data/
+license-keys/
 packages/jetbrains-plugin/.gradle-bootstrap/
 functional-tests/artifacts/
 functional-tests/.*.state.json

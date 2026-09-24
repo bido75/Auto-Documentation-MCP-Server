@@ -34,6 +34,23 @@ Generate safe keys:
 node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
 ```
 
+### Enable license issuance
+
+The Lemon Squeezy webhook signs licenses inside the bridge container. Keep the
+private key outside Git and mount its directory read-only:
+
+```bash
+mkdir -p license-keys
+cp /secure/path/license-private.pem license-keys/license-private.pem
+chmod 600 license-keys/license-private.pem
+```
+
+Set `LEMONSQUEEZY_WEBHOOK_SECRET` in `.env`. The Compose defaults mount
+`./license-keys` at `/run/auto-doc-license` and set
+`AUTO_DOC_LICENSE_PRIVATE_KEY_PATH` to the mounted key. To keep keys elsewhere,
+set `AUTO_DOC_LICENSE_KEYS_DIR` to that host directory. The directory and key
+are excluded from both Git and Docker build contexts.
+
 Start the stack:
 
 ```bash
