@@ -4,6 +4,7 @@
  * UNMOCKED: real temp artifact root. Must FAIL if path validation removed. DO NOT DELETE/SKIP.
  */
 import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -39,7 +40,8 @@ async function exists(path: string): Promise<boolean> {
 
 beforeEach(() => {
   delete process.env.AUTO_DOC_ARTIFACT_ROOT;
-  delete process.env.AUTO_DOC_STATE_FILE;
+  process.env.AUTO_DOC_STATE_FILE = join(tmpdir(), `auto-doc-visual-state-${randomUUID()}.json`);
+  process.env.STATE_ENCRYPTION_KEY = "a".repeat(64);
 });
 
 describe("visual-evidence-path-safety", () => {

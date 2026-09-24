@@ -1,7 +1,9 @@
 import { config as dotenvConfig } from "dotenv";
 import { assertNotionTokenPresent } from "./lib/notion-preflight.js";
 
-dotenvConfig();
+if (process.env.NODE_ENV !== "test") {
+  dotenvConfig();
+}
 
 export type PublishingMode = "Conservative" | "Balanced" | "Fully Automatic";
 
