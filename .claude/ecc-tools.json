@@ -1,0 +1,304 @@
+{
+  "version": "1.3",
+  "schemaVersion": "1.0",
+  "generatedBy": "ecc-tools",
+  "generatedAt": "2026-06-27T08:23:40.019Z",
+  "repo": "https://github.com/bido75/Auto-Documentation-MCP-Server",
+  "referenceSetReadiness": {
+    "score": 43,
+    "present": 3,
+    "total": 7,
+    "items": [
+      {
+        "id": "deep-analyzer-corpus",
+        "label": "Deep analyzer corpus",
+        "status": "present",
+        "evidence": [
+          "tests/integration/analyzer-fix-no-regression.integration.test.ts",
+          "tests/unit/analyzer-honest-fail.test.ts",
+          "tests/unit/analyzer-output-repair.test.ts"
+        ],
+        "recommendation": "Add analyzer fixture, golden, benchmark, or reference-set files that can catch analyzer regressions."
+      },
+      {
+        "id": "rag-evaluator",
+        "label": "RAG/evaluator comparison",
+        "status": "missing",
+        "evidence": [],
+        "recommendation": "Add retrieval or evaluator reference-set comparison fixtures with expected ranking behavior."
+      },
+      {
+        "id": "pr-salvage",
+        "label": "PR salvage/review corpus",
+        "status": "missing",
+        "evidence": [],
+        "recommendation": "Add stale-PR, review-thread, reopen-flow, or salvage reference cases for queue cleanup automation."
+      },
+      {
+        "id": "discussion-triage",
+        "label": "Discussion triage corpus",
+        "status": "missing",
+        "evidence": [],
+        "recommendation": "Add public discussion triage fixtures, golden cases, or reference sets for informational, answered, and no-response classifications."
+      },
+      {
+        "id": "harness-compatibility",
+        "label": "Harness compatibility",
+        "status": "present",
+        "evidence": [
+          ".mcp.json"
+        ],
+        "recommendation": "Add cross-harness, adapter-compliance, or harness-audit evidence for Claude, Codex, OpenCode, Zed, dmux, and agent surfaces."
+      },
+      {
+        "id": "security-evidence",
+        "label": "Security evidence",
+        "status": "present",
+        "evidence": [
+          "tests/unit/security-hardening.test.ts"
+        ],
+        "recommendation": "Attach security evidence such as SBOMs, SARIF, audit reports, or AgentShield evidence packs."
+      },
+      {
+        "id": "ci-failure-mode",
+        "label": "CI failure-mode evidence",
+        "status": "missing",
+        "evidence": [],
+        "recommendation": "Add captured CI failure logs, dry-run fixtures, or troubleshooting docs for common workflow failure modes."
+      }
+    ]
+  },
+  "profiles": {
+    "requested": "security",
+    "recommended": "security",
+    "effective": "developer",
+    "requestedAlias": "security",
+    "recommendedAlias": "security",
+    "effectiveAlias": "developer"
+  },
+  "requestedProfile": "security",
+  "profile": "developer",
+  "recommendedProfile": "security",
+  "effectiveProfile": "developer",
+  "tier": "free",
+  "requestedComponents": [
+    "repo-baseline",
+    "workflow-automation",
+    "security-audits"
+  ],
+  "selectedComponents": [
+    "repo-baseline",
+    "workflow-automation"
+  ],
+  "requestedAddComponents": [],
+  "requestedRemoveComponents": [],
+  "blockedRemovalComponents": [],
+  "tierFilteredComponents": [
+    "security-audits"
+  ],
+  "requestedRootPackages": [
+    "runtime-core",
+    "workflow-pack",
+    "agentshield-pack"
+  ],
+  "selectedRootPackages": [
+    "runtime-core",
+    "workflow-pack"
+  ],
+  "requestedPackages": [
+    "runtime-core",
+    "workflow-pack",
+    "agentshield-pack"
+  ],
+  "requestedAddPackages": [],
+  "requestedRemovePackages": [],
+  "selectedPackages": [
+    "runtime-core",
+    "workflow-pack"
+  ],
+  "packages": [
+    "runtime-core",
+    "workflow-pack"
+  ],
+  "blockedRemovalPackages": [],
+  "tierFilteredRootPackages": [
+    "agentshield-pack"
+  ],
+  "tierFilteredPackages": [
+    "agentshield-pack"
+  ],
+  "conflictingPackages": [],
+  "dependencyGraph": {
+    "runtime-core": [],
+    "workflow-pack": [
+      "runtime-core"
+    ]
+  },
+  "resolutionOrder": [
+    "runtime-core",
+    "workflow-pack"
+  ],
+  "requestedModules": [
+    "runtime-core",
+    "workflow-pack",
+    "agentshield-pack"
+  ],
+  "selectedModules": [
+    "runtime-core",
+    "workflow-pack"
+  ],
+  "modules": [
+    "runtime-core",
+    "workflow-pack"
+  ],
+  "managedFiles": [
+    ".claude/skills/Auto-Documentation-MCP-Server/SKILL.md",
+    ".agents/skills/Auto-Documentation-MCP-Server/SKILL.md",
+    ".agents/skills/Auto-Documentation-MCP-Server/agents/openai.yaml",
+    ".claude/identity.json",
+    ".codex/config.toml",
+    ".codex/AGENTS.md",
+    ".codex/agents/explorer.toml",
+    ".codex/agents/reviewer.toml",
+    ".codex/agents/docs-researcher.toml",
+    ".claude/homunculus/instincts/inherited/Auto-Documentation-MCP-Server-instincts.yaml",
+    ".claude/commands/feature-implementation-with-tests-and-docs.md",
+    ".claude/commands/security-or-production-hardening.md",
+    ".claude/commands/provider-or-tooling-extension.md"
+  ],
+  "packageFiles": {
+    "runtime-core": [
+      ".claude/skills/Auto-Documentation-MCP-Server/SKILL.md",
+      ".agents/skills/Auto-Documentation-MCP-Server/SKILL.md",
+      ".agents/skills/Auto-Documentation-MCP-Server/agents/openai.yaml",
+      ".claude/identity.json",
+      ".codex/config.toml",
+      ".codex/AGENTS.md",
+      ".codex/agents/explorer.toml",
+      ".codex/agents/reviewer.toml",
+      ".codex/agents/docs-researcher.toml",
+      ".claude/homunculus/instincts/inherited/Auto-Documentation-MCP-Server-instincts.yaml"
+    ],
+    "workflow-pack": [
+      ".claude/commands/feature-implementation-with-tests-and-docs.md",
+      ".claude/commands/security-or-production-hardening.md",
+      ".claude/commands/provider-or-tooling-extension.md"
+    ]
+  },
+  "moduleFiles": {
+    "runtime-core": [
+      ".claude/skills/Auto-Documentation-MCP-Server/SKILL.md",
+      ".agents/skills/Auto-Documentation-MCP-Server/SKILL.md",
+      ".agents/skills/Auto-Documentation-MCP-Server/agents/openai.yaml",
+      ".claude/identity.json",
+      ".codex/config.toml",
+      ".codex/AGENTS.md",
+      ".codex/agents/explorer.toml",
+      ".codex/agents/reviewer.toml",
+      ".codex/agents/docs-researcher.toml",
+      ".claude/homunculus/instincts/inherited/Auto-Documentation-MCP-Server-instincts.yaml"
+    ],
+    "workflow-pack": [
+      ".claude/commands/feature-implementation-with-tests-and-docs.md",
+      ".claude/commands/security-or-production-hardening.md",
+      ".claude/commands/provider-or-tooling-extension.md"
+    ]
+  },
+  "files": [
+    {
+      "moduleId": "runtime-core",
+      "path": ".claude/skills/Auto-Documentation-MCP-Server/SKILL.md",
+      "description": "Repository-specific Claude Code skill generated from git history."
+    },
+    {
+      "moduleId": "runtime-core",
+      "path": ".agents/skills/Auto-Documentation-MCP-Server/SKILL.md",
+      "description": "Codex-facing copy of the generated repository skill."
+    },
+    {
+      "moduleId": "runtime-core",
+      "path": ".agents/skills/Auto-Documentation-MCP-Server/agents/openai.yaml",
+      "description": "Codex skill metadata so the repo skill appears cleanly in the skill interface."
+    },
+    {
+      "moduleId": "runtime-core",
+      "path": ".claude/identity.json",
+      "description": "Suggested identity.json baseline derived from repository conventions."
+    },
+    {
+      "moduleId": "runtime-core",
+      "path": ".codex/config.toml",
+      "description": "Repo-local Codex MCP and multi-agent baseline aligned with ECC defaults."
+    },
+    {
+      "moduleId": "runtime-core",
+      "path": ".codex/AGENTS.md",
+      "description": "Codex usage guide that points at the generated repo skill and workflow bundle."
+    },
+    {
+      "moduleId": "runtime-core",
+      "path": ".codex/agents/explorer.toml",
+      "description": "Read-only explorer role config for Codex multi-agent work."
+    },
+    {
+      "moduleId": "runtime-core",
+      "path": ".codex/agents/reviewer.toml",
+      "description": "Read-only reviewer role config focused on correctness and security."
+    },
+    {
+      "moduleId": "runtime-core",
+      "path": ".codex/agents/docs-researcher.toml",
+      "description": "Read-only docs researcher role config for API verification."
+    },
+    {
+      "moduleId": "runtime-core",
+      "path": ".claude/homunculus/instincts/inherited/Auto-Documentation-MCP-Server-instincts.yaml",
+      "description": "Continuous-learning instincts derived from repository patterns."
+    },
+    {
+      "moduleId": "workflow-pack",
+      "path": ".claude/commands/feature-implementation-with-tests-and-docs.md",
+      "description": "Workflow command scaffold for feature-implementation-with-tests-and-docs."
+    },
+    {
+      "moduleId": "workflow-pack",
+      "path": ".claude/commands/security-or-production-hardening.md",
+      "description": "Workflow command scaffold for security-or-production-hardening."
+    },
+    {
+      "moduleId": "workflow-pack",
+      "path": ".claude/commands/provider-or-tooling-extension.md",
+      "description": "Workflow command scaffold for provider-or-tooling-extension."
+    }
+  ],
+  "workflows": [
+    {
+      "command": "feature-implementation-with-tests-and-docs",
+      "path": ".claude/commands/feature-implementation-with-tests-and-docs.md"
+    },
+    {
+      "command": "security-or-production-hardening",
+      "path": ".claude/commands/security-or-production-hardening.md"
+    },
+    {
+      "command": "provider-or-tooling-extension",
+      "path": ".claude/commands/provider-or-tooling-extension.md"
+    }
+  ],
+  "adapters": {
+    "claudeCode": {
+      "skillPath": ".claude/skills/Auto-Documentation-MCP-Server/SKILL.md",
+      "identityPath": ".claude/identity.json",
+      "commandPaths": [
+        ".claude/commands/feature-implementation-with-tests-and-docs.md",
+        ".claude/commands/security-or-production-hardening.md",
+        ".claude/commands/provider-or-tooling-extension.md"
+      ]
+    },
+    "codex": {
+      "configPath": ".codex/config.toml",
+      "agentsGuidePath": ".codex/AGENTS.md",
+      "skillPath": ".agents/skills/Auto-Documentation-MCP-Server/SKILL.md"
+    }
+  }
+}

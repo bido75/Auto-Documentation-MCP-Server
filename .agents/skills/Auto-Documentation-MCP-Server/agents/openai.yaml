@@ -1,0 +1,6 @@
+interface:
+  display_name: "Auto Documentation MCP Server"
+  short_description: "Repo-specific patterns and workflows for Auto-Documentation-MCP-Server"
+  default_prompt: "Use the Auto-Documentation-MCP-Server repo skill to follow existing architecture, testing, and workflow conventions."
+policy:
+  allow_implicit_invocation: true
