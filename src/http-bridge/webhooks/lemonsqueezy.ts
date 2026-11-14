@@ -65,6 +65,14 @@ function readSubscriberEmail(payload: unknown): string | null {
   return [userEmail, customerEmail, orderEmail].find((value): value is string => typeof value === "string" && value.includes("@")) ?? null;
 }
 
+function readProductId(payload: unknown): number | null {
+  const root = payload as Record<string, unknown>;
+  const data = root.data as Record<string, unknown> | undefined;
+  const attributes = data?.attributes as Record<string, unknown> | undefined;
+  const pid = attributes?.product_id;
+  return typeof pid === "number" ? pid : null;
+}
+
 function readEventName(payload: unknown): string {
   const root = payload as Record<string, unknown>;
   const meta = root.meta as Record<string, unknown> | undefined;
@@ -88,9 +96,29 @@ export async function handleLemonsqueezyWebhook(req: Request, res: Response): Pr
   }
 
   const eventName = readEventName(payload);
+  if (eventName === "subscription_cancelled") {
+    const email = readSubscriberEmail(payload) ?? "(unknown)";
+    console.error(
+      `[license] Subscription cancelled for ${email}; ` +
+        `existing offline JWT remains valid until its exp claim.`,
+    );
+    res.status(200).json({ ok: true, status: "noted", eventName });
+    return;
+  }
+
   if (!["subscription_created", "order_created", "license_key_created"].includes(eventName)) {
     res.status(200).json({ ok: true, status: "ignored", eventName });
     return;
+  }
+
+  // Ignore events from other Lemon Squeezy products on the same account.
+  const expectedProductId = Number(process.env.LEMONSQUEEZY_PRODUCT_ID?.trim() ?? "0");
+  if (expectedProductId > 0) {
+    const incomingProductId = readProductId(payload);
+    if (incomingProductId !== expectedProductId) {
+      res.status(200).json({ ok: true, status: "ignored", reason: "product_mismatch" });
+      return;
+    }
   }
 
   const subscriberEmail = readSubscriberEmail(payload);
@@ -118,8 +146,9 @@ export async function handleLemonsqueezyWebhook(req: Request, res: Response): Pr
     });
     return;
   }
-  console.error(`[license] Issued Auto-Doc MCP license for ${subscriberEmail}`);
-  res.status(200).json({ ok: true, status: "issued", eventName, licenseKey });
+  console.error(`[license] Issued Auto-Doc MCP license for ${subscriberEmail} (event: ${eventName})`);
+  void licenseKey; // JWT delivery is via /license/exchange, not the webhook response
+  res.status(200).json({ ok: true, status: "issued", eventName });
 }
 
 export const lemonsqueezyWebhookInternals = {

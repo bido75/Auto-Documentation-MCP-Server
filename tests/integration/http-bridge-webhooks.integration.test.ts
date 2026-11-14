@@ -41,6 +41,17 @@ afterEach(async () => {
 });
 
 describe("add-unmocked-webhook-and-provider-smoke", () => {
+  it("serves /.well-known/mcp/server-card.json for Smithery registry discovery", async () => {
+    const baseUrl = await startBridge();
+    const response = await fetch(`${baseUrl}/.well-known/mcp/server-card.json`);
+    expect(response.status).toBe(200);
+    const card = (await response.json()) as Record<string, unknown>;
+    expect(card).toHaveProperty("name");
+    expect(card).toHaveProperty("version");
+    expect(card).toHaveProperty("transports");
+    expect(card).toHaveProperty("tools_count", 36);
+  });
+
   it("valid HMAC signature accepts the webhook through the real HTTP route", async () => {
     const baseUrl = await startBridge();
     const body = JSON.stringify({ zen: "Approachable tests are better tests." });

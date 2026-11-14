@@ -1450,6 +1450,30 @@ export function createHttpBridgeApp(options?: HttpBridgeOptions): Express {
     await handleLicenseExchange(req, res);
   });
 
+  // Smithery registry discovery — must be served before /health so it is
+  // found by crawlers that stop at the first 404.
+  app.get("/.well-known/mcp/server-card.json", (_req, res) => {
+    res.json({
+      name: SERVER_METADATA.name,
+      description:
+        "Silently generates living user and admin manuals in Notion as you build. " +
+        "Captures events, summarises commits, and writes structured docs via AI.",
+      version: SERVER_METADATA.version,
+      homepage: "https://www.npmjs.com/package/auto-doc-mcp",
+      transports: ["http-sse", "stdio"],
+      tools_count: REGISTERED_TOOL_NAMES.length,
+      license: "MIT",
+      pricing: {
+        model: "byo-api",
+        free_tier:
+          "core tools — project init, event capture, git summaries, provider setup, status checks",
+        paid_tier:
+          "$3/month maintenance license for AI-backed analysis, probing, synthesis, " +
+          "humanizer, health score, webhooks, packaging, and PDF/export",
+      },
+    });
+  });
+
   app.get("/health", (_req, res) => {
     res.json({
       status: "running",

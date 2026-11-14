@@ -12,6 +12,7 @@ let server: Server | null = null;
 let temporaryDirectory: string | null = null;
 const originalSecret = process.env.LEMONSQUEEZY_WEBHOOK_SECRET;
 const originalPrivateKeyPath = process.env.AUTO_DOC_LICENSE_PRIVATE_KEY_PATH;
+const originalProductId = process.env.LEMONSQUEEZY_PRODUCT_ID;
 
 async function startBridge(): Promise<string> {
   process.env.LEMONSQUEEZY_WEBHOOK_SECRET = secret;
@@ -55,6 +56,8 @@ afterEach(async () => {
   else process.env.LEMONSQUEEZY_WEBHOOK_SECRET = originalSecret;
   if (originalPrivateKeyPath === undefined) delete process.env.AUTO_DOC_LICENSE_PRIVATE_KEY_PATH;
   else process.env.AUTO_DOC_LICENSE_PRIVATE_KEY_PATH = originalPrivateKeyPath;
+  if (originalProductId === undefined) delete process.env.LEMONSQUEEZY_PRODUCT_ID;
+  else process.env.LEMONSQUEEZY_PRODUCT_ID = originalProductId;
 });
 
 describe("Lemon Squeezy license webhook", () => {
@@ -80,8 +83,41 @@ describe("Lemon Squeezy license webhook", () => {
     const response = await sendWebhook(baseUrl, webhookBody());
 
     expect(response.status).toBe(200);
-    const payload = (await response.json()) as { ok?: boolean; status?: string; licenseKey?: string };
+    const payload = (await response.json()) as Record<string, unknown>;
     expect(payload).toMatchObject({ ok: true, status: "issued" });
-    expect(payload.licenseKey?.split(".")).toHaveLength(3);
+    // JWT must NOT be exposed in the webhook response — delivery is via /license/exchange
+    expect(payload).not.toHaveProperty("licenseKey");
+  });
+
+  it("ignores events from other products when LEMONSQUEEZY_PRODUCT_ID is set", async () => {
+    const previousProductId = process.env.LEMONSQUEEZY_PRODUCT_ID;
+    process.env.LEMONSQUEEZY_PRODUCT_ID = "1384327";
+    const baseUrl = await startBridge();
+    const body = JSON.stringify({
+      meta: { event_name: "subscription_created" },
+      data: { attributes: { user_email: "other@example.test", product_id: 9999999 } },
+    });
+    const response = await sendWebhook(baseUrl, body);
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload).toMatchObject({ ok: true, status: "ignored", reason: "product_mismatch" });
+
+    if (previousProductId === undefined) delete process.env.LEMONSQUEEZY_PRODUCT_ID;
+    else process.env.LEMONSQUEEZY_PRODUCT_ID = previousProductId;
+  });
+
+  it("acknowledges subscription_cancelled without attempting license issuance", async () => {
+    const baseUrl = await startBridge();
+    const body = JSON.stringify({
+      meta: { event_name: "subscription_cancelled" },
+      data: { attributes: { user_email: "cancelled@example.test" } },
+    });
+    const response = await sendWebhook(baseUrl, body);
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload).toMatchObject({ ok: true, status: "noted", eventName: "subscription_cancelled" });
+    expect(payload).not.toHaveProperty("licenseKey");
   });
 });
