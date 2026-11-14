@@ -212,7 +212,31 @@ export async function runInit(argv: string[] = [], options: InitOptions = {}): P
     }
 
     console.error("Creating Notion project manual...");
-    const initialized = await callInitializeTool({ serverUrl, bridgeApiKey, projectName, parentPageId });
+    let initialized: InitializeToolResult;
+    try {
+      initialized = await callInitializeTool({ serverUrl, bridgeApiKey, projectName, parentPageId });
+    } catch (error: unknown) {
+      const isNetworkError =
+        error instanceof TypeError ||
+        (error instanceof Error &&
+          (error.name === "TimeoutError" ||
+            error.message.includes("ECONNREFUSED") ||
+            error.message.includes("ENOTFOUND") ||
+            error.message.includes("fetch failed") ||
+            error.message.includes("Failed to fetch")));
+      if (isNetworkError) {
+        console.error(
+          `[auto-doc-mcp] Could not reach the bridge server at ${serverUrl}.\n` +
+            `Make sure the bridge is running before calling 'init':\n` +
+            `  docker compose up -d          (Docker deployment)\n` +
+            `  npm run start                 (local development)\n` +
+            `Then retry: npx auto-doc-mcp init`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
+    }
     const projectId = initialized.projectId;
     if (!projectId) {
       throw new Error("Project ID was missing after initialization.");

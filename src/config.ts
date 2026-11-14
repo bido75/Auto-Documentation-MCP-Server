@@ -170,8 +170,12 @@ export function getOptionalRuntimeConfig(env = process.env): OptionalRuntimeConf
     bifrostEndpoint: envString("BIFROST_ENDPOINT", "http://bifrost-gateway:8080", env),
     bifrostVirtualKey: bifrostVk,
     provider: {
-      type: envString("AI_PROVIDER_TYPE", "bifrost", env),
-      endpoint: envString("AI_ENDPOINT", "http://bifrost-gateway:8080/v1", env),
+      // Default to "deterministic" so new users without Bifrost or an API key
+      // get working free-tier tools immediately. Set AI_PROVIDER_TYPE to
+      // "cloud-openrouter", "cloud-anthropic", "local-ollama", or "bifrost"
+      // to enable AI-backed analysis and licensed tools.
+      type: envString("AI_PROVIDER_TYPE", "deterministic", env),
+      endpoint: envString("AI_ENDPOINT", "https://openrouter.ai/api/v1", env),
       apiKey: env.AI_API_KEY?.trim() || env.OPENAI_API_KEY?.trim() || env.OPENROUTER_API_KEY?.trim() || undefined,
       modelName: envString("AI_MODEL_NAME", "openai/llama3.2:3b-instruct-q4_K_M", env),
       fallbackModels: [env.AI_FALLBACK_MODEL_1?.trim(), env.AI_FALLBACK_MODEL_2?.trim(), env.AI_FALLBACK_MODEL_3?.trim()].filter(

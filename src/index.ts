@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { DEFAULT_STATE_ENCRYPTION_KEY } from "./config.js";
 import { logToolEvent, resolveTraceId } from "./lib/logger.js";
 import { createServer } from "./server.js";
 import { runContinuousDocumentationRunner } from "./runner/index.js";
@@ -48,6 +49,15 @@ export async function runApplication(argv = process.argv, env = process.env): Pr
 	const server = createServer();
 	const transport = new StdioServerTransport();
 	await server.connect(transport);
+	// Warn if the user hasn't set a custom encryption key — data is still
+	// encrypted but all installations share the same key, reducing isolation.
+	if ((env.STATE_ENCRYPTION_KEY?.trim() || DEFAULT_STATE_ENCRYPTION_KEY) === DEFAULT_STATE_ENCRYPTION_KEY) {
+		console.error(
+			"[auto-doc-mcp] WARNING: STATE_ENCRYPTION_KEY is not set (using the shared default). " +
+				"Generate a unique key with: node -e \"console.log(require('node:crypto').randomBytes(32).toString('hex'))\" " +
+				"and add it to your .env file for better isolation between installations.",
+		);
+	}
 	console.error("Auto-Documentation Notion MCP Server running on stdio");
 }
 
