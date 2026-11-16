@@ -102,6 +102,44 @@ Container default: HTTP bridge mode. The Docker image starts `node build/src/cli
 
 Use stdio MCP locally with `npm run dev` or `node build/src/index.js`. Use continuous mode with `AUTO_DOC_RUNTIME_MODE=runner node build/src/index.js` or `node build/src/cli/index.js runner` after configuring runner targets.
 
+## Enabling Autonomous Documentation Generation
+
+Stdio MCP mode exposes the tools to an agent, but it does not poll Git by itself. Choose one of these activation paths after `initialize_project_manual` returns a project ID.
+
+### Option 1: Post-commit hook (recommended)
+
+Install a composable hook in the current Git repository:
+
+```bash
+npx auto-doc-mcp init --post-commit-hook
+```
+
+The hook invokes the full capture, analysis, upsert, and publish path after each commit. It requires a valid `AUTO_DOC_LICENSE_KEY`, `NOTION_TOKEN`, and an initialized project binding in the canonical state store.
+
+### Option 2: Continuous runner
+
+Set `AUTO_DOC_RUNNER_PROJECT_ID` and `AUTO_DOC_RUNNER_REPO_PATH`, then run the background process alongside the MCP server:
+
+```bash
+npm run runner
+```
+
+For local development, use `npm run runner:dev`.
+
+### Option 3: Agent-triggered documentation
+
+At the end of a coding session, have the agent call `run_autonomous_documentation_trigger`:
+
+```json
+{
+  "projectId": "<from initialize_project_manual>",
+  "repoPath": "/absolute/path/to/repo",
+  "mode": "last_commit"
+}
+```
+
+`capture_development_event` stores evidence only; it does not create User Guide or Admin Guide entries by itself. All three autonomous paths require a valid maintenance license for AI-backed analysis and documentation upserts.
+
 ## Retrospective Probing
 
 For projects that existed before Auto-Doc was connected, use the probing tools to backfill missed manual coverage:

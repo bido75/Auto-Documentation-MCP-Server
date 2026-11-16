@@ -39,7 +39,18 @@ const CACHE_TTL_MS = 60 * 60 * 1000;
 const GRACE_PERIOD_DAYS = 7;
 const LICENSE_STORE = "auto-doc-mcp";
 const LICENSE_PLAN: LicensePlan = "maintenance";
-const DEFAULT_LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+const ACTIVE_LICENSE_PUBLIC_KEY = `-----BEGIN PUBLIC KEY-----
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvWXXdSxDBFw6TYYqnh2x
+qTbUx5HE0PARqvT+KyGW6Qhzq3pRoA0hdWu1o3A0dBhyEDtzZSeAjQBPcolOE3WB
+JpZI3EUEG4k/e3wU/GWucvSQSt40JifK1iLBodJgTvj1EnsQqFOhFAFqVe/33z1j
+ZJnlgzlY+CWmdc9JgkTbKTcyqw9scE3ODKo42AuGeATw9XKNDlDkQC7xMfITxSIi
+iDu+CcpNudfpVnqa70aaaYyvv4GAtJ5oTOldGpDzta6w96cL8ifCZVkd148gDByO
+9kpVF/mJIdT03pZS1SogfnBHTbaJu9NdVy8EYbyyKCvzojyWINJt6fE6VmakeKQv
+jQIDAQAB
+-----END PUBLIC KEY-----`;
+
+// Keep the previous verifier during key rotation so already-issued licenses remain valid.
+const LEGACY_LICENSE_PUBLIC_KEYS = [`-----BEGIN PUBLIC KEY-----
 MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0O1j+8+kkz07DkZWmXE/
 gjHo/FbiD/FlceMp+IMkcbDf/NHjiVXIrxFwVgcoqtC6++q9GEub/ZdnzIgdMyJ7
 j608IzXJlvAqBEU8W2u59nstA6lmzEvRA2ePqH3/bqQw4qCf1SBYuN47WTqKlg1h
@@ -47,7 +58,7 @@ eNTG6Lckprw7A6nWDEYcRj/01X2rB59sXcFMj19OrheYW/ifz0sUDcHjzFDo6INe
 0AeUvncCpizheKcdjl5299d8oODDtDWW5YhmU6eonY6OeBf0HzvBmDOSw1/Qhh/C
 7yYOvS5lPikswTBSnfHVl7N9J3oLgJ/N8CqXd56ExAe8CzY1pXb9l0F7NjHEPdBX
 EQIDAQAB
------END PUBLIC KEY-----`;
+-----END PUBLIC KEY-----`];
 
 const FREE_TOOLS = new Set([
   "initialize_project_manual",
@@ -71,18 +82,18 @@ function decodeBase64Url(segment: string): Buffer {
   return Buffer.from(`${normalized}${padding}`, "base64");
 }
 
-function readLicensePublicKey(env: NodeJS.ProcessEnv): string | null {
+function readLicensePublicKeys(env: NodeJS.ProcessEnv): string[] {
   const inline = env.AUTO_DOC_LICENSE_PUBLIC_KEY?.trim();
   if (inline) {
-    return inline.replace(/\\n/g, "\n");
+    return [inline.replace(/\\n/g, "\n")];
   }
 
   const filePath = env.AUTO_DOC_LICENSE_PUBLIC_KEY_FILE?.trim();
   if (filePath) {
-    return readFileSync(filePath, "utf8");
+    return [readFileSync(filePath, "utf8")];
   }
 
-  return DEFAULT_LICENSE_PUBLIC_KEY;
+  return [ACTIVE_LICENSE_PUBLIC_KEY, ...LEGACY_LICENSE_PUBLIC_KEYS];
 }
 
 function parsePayload(payloadSegment: string): LicensePayload | null {
@@ -129,8 +140,8 @@ export function getLicenseStatus(env: NodeJS.ProcessEnv = process.env, now = new
     return status;
   }
 
-  const publicKey = readLicensePublicKey(env);
-  if (!publicKey) {
+  const publicKeys = readLicensePublicKeys(env);
+  if (publicKeys.length === 0) {
     const status: LicenseStatus = { valid: false, reason: "missing_public_key" };
     if (env === process.env) {
       cachedStatus = status;
@@ -158,10 +169,14 @@ export function getLicenseStatus(env: NodeJS.ProcessEnv = process.env, now = new
       return { valid: false, reason: "wrong_plan" };
     }
 
-    const verifier = createVerify("RSA-SHA256");
-    verifier.update(`${header}.${payloadSegment}`);
-    verifier.end();
-    const signatureValid = verifier.verify(publicKey, decodeBase64Url(signatureSegment));
+    const signedContent = `${header}.${payloadSegment}`;
+    const signature = decodeBase64Url(signatureSegment);
+    const signatureValid = publicKeys.some((publicKey) => {
+      const verifier = createVerify("RSA-SHA256");
+      verifier.update(signedContent);
+      verifier.end();
+      return verifier.verify(publicKey, signature);
+    });
     if (!signatureValid) {
       return { valid: false, reason: "invalid_signature" };
     }

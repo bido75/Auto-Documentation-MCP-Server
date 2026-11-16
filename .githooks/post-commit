@@ -1,4 +1,21 @@
 #!/usr/bin/env sh
+# BEGIN Auto-Doc MCP - post-commit hook
+REPO_PATH="$(git rev-parse --show-toplevel)"
+SERVER_PATH="$REPO_PATH/build/src/index.js"
+COMMIT_SHA="$(git rev-parse HEAD)"
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+FILES="$(git diff-tree --no-commit-id -r --name-only HEAD | head -50 | tr '\n' ',')"
+LOG_PATH="$REPO_PATH/.git/auto-doc-post-commit.log"
+
+AUTO_DOC_HOOK_REPO_PATH="$REPO_PATH" \
+AUTO_DOC_HOOK_COMMIT_SHA="$COMMIT_SHA" \
+AUTO_DOC_HOOK_BRANCH="$BRANCH" \
+node "$SERVER_PATH" post-commit >>"$LOG_PATH" 2>&1 &
+
+# Hook metadata for tooling visibility
+echo "[auto-doc-mcp] commit=$COMMIT_SHA branch=$BRANCH files=$FILES" >/dev/null
+# END Auto-Doc MCP - post-commit hook
+
 set -eu
 
 branch="$(git rev-parse --abbrev-ref HEAD)"
