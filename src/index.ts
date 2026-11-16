@@ -25,6 +25,16 @@ function resolveRuntimeMode(argv: string[], env: NodeJS.ProcessEnv): "mcp" | "ru
 	return "mcp";
 }
 
+export function logMcpModeGuidance(): void {
+	console.error(
+		"[auto-doc-mcp] MCP server ready (stdio mode).\n" +
+			"[auto-doc-mcp] To generate docs: call run_autonomous_documentation_trigger after each session,\n" +
+			"[auto-doc-mcp] or install the post-commit hook: npx auto-doc-mcp init --post-commit-hook\n" +
+			"[auto-doc-mcp] For continuous background docs, run the runner in a separate process:\n" +
+			"[auto-doc-mcp]   AUTO_DOC_RUNNER_PROJECT_ID=<id> AUTO_DOC_RUNNER_REPO_PATH=<path> npm run runner",
+	);
+}
+
 export async function runApplication(argv = process.argv, env = process.env): Promise<void> {
 	if (!env.NOTION_TOKEN || env.NOTION_TOKEN.trim().length === 0) {
 		const storedToken = await resolveToken();
@@ -59,6 +69,7 @@ export async function runApplication(argv = process.argv, env = process.env): Pr
 		);
 	}
 	console.error("Auto-Documentation Notion MCP Server running on stdio");
+	logMcpModeGuidance();
 }
 
 const isExecutedDirectly = fileURLToPath(import.meta.url) === process.argv[1];

@@ -1,11 +1,14 @@
 {
   "mcpServers": {
-    "auto-documentation-mcp-server": {
-      "command": "node",
-      "args": ["build/src/index.js"],
-      "env": {
-        "AUTO_DOC_RUNTIME_MODE": "mcp"
-      }
+    "auto-doc-mcp": {
+      "type": "stdio",
+      "command": "npx.cmd",
+      "args": [
+        "-y",
+        "--package",
+        "auto-doc-mcp@latest",
+        "auto-docs-notion-mcp"
+      ]
     }
   }
 }

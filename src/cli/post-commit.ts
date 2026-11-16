@@ -1,4 +1,6 @@
 import { simpleGit } from "simple-git";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { executeAutonomousDocumentationTrigger } from "../orchestrator/auto-doc-orchestrator.js";
 import { resolveToken } from "../installer/token-store.js";
 import { getStateStore, type ProjectState } from "../lib/state-store.js";
@@ -10,7 +12,7 @@ function normalizeRemoteUrl(input: string): string {
   return normalized.replace(/\.git$/i, "").toLowerCase();
 }
 
-function selectProject(input: {
+export function selectProject(input: {
   projects: ProjectState[];
   preferredProjectId?: string;
   remoteUrl?: string;
@@ -36,11 +38,17 @@ function selectProject(input: {
     }
   }
 
-  if (input.projects.length === 1) {
-    return input.projects[0];
-  }
-
   return null;
+}
+
+async function readBoundProjectId(repoPath: string): Promise<string | undefined> {
+  try {
+    const content = await readFile(join(repoPath, ".auto-doc-mcp.json"), "utf8");
+    const parsed = JSON.parse(content) as { projectId?: unknown };
+    return typeof parsed.projectId === "string" && parsed.projectId.trim() ? parsed.projectId.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export async function runPostCommitTrigger(env = process.env): Promise<void> {
@@ -75,7 +83,7 @@ export async function runPostCommitTrigger(env = process.env): Promise<void> {
 
   const project = selectProject({
     projects,
-    preferredProjectId: env.AUTO_DOC_PROJECT_ID?.trim(),
+    preferredProjectId: env.AUTO_DOC_PROJECT_ID?.trim() || await readBoundProjectId(repoPath),
     remoteUrl,
   });
 

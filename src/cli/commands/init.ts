@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import * as readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
+import { simpleGit } from "simple-git";
 import { installGitHook } from "../../git-hook/install.js";
 import { writeGithubActionsWorkflow } from "./init-github-actions.js";
 
@@ -11,6 +12,7 @@ type ProjectType = "Node.js" | "Python" | "Go" | "Rust" | "Ruby" | "Generic";
 interface InitOptions {
   cwd?: string;
   githubActions?: boolean;
+  postCommitHook?: boolean;
   yes?: boolean;
 }
 
@@ -44,7 +46,20 @@ async function appendGitignore(cwd: string, entry: string): Promise<void> {
 
 function currentServerPath(): string {
   const cliDir = path.dirname(fileURLToPath(import.meta.url));
-  return path.resolve(cliDir, "..", "index.js");
+  const normalizedCliDir = cliDir.replaceAll("\\", "/");
+  if (!normalizedCliDir.includes("/build/src/cli/commands")) {
+    return path.resolve(cliDir, "..", "..", "..", "build", "src", "index.js");
+  }
+  return path.resolve(cliDir, "..", "..", "index.js");
+}
+
+async function installPostCommitHookOnly(cwd: string): Promise<string> {
+  const repoRoot = (await simpleGit(cwd).revparse(["--show-toplevel"])).trim();
+  if (!repoRoot) {
+    throw new Error("Could not resolve the git repository root.");
+  }
+
+  return installGitHook(repoRoot, currentServerPath());
 }
 
 function parseProjectIdFromToolResponse(payload: unknown): InitializeToolResult {
@@ -113,11 +128,12 @@ async function writeCursorRules(cwd: string, projectId: string): Promise<void> {
 
   const block = `
 # Auto-Documentation
-After completing any feature, call these auto-doc-mcp tools:
-1. get_git_diff_summary with mode "last_commit"
-2. capture_development_event with projectId "${projectId}"
-3. analyze_documentation_candidate
-4. If shouldDocument is true, call upsert_feature_documentation
+After completing a feature or a significant coding session, call the
+auto-doc-mcp tool run_autonomous_documentation_trigger with:
+- projectId: "${projectId}"
+- repoPath: the absolute repository root
+- mode: "last_commit" after a commit, otherwise "working_tree"
+Do not stop at capture_development_event; it stores evidence but does not write documentation.
 Documentation runs as part of finishing development work.
 `;
   await fs.writeFile(rulesPath, `${existing.trimEnd()}\n${block}`, "utf8");
@@ -194,7 +210,21 @@ async function collectLicenseKey(input: {
 export async function runInit(argv: string[] = [], options: InitOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd();
   const githubActions = options.githubActions ?? (argv.includes("--github-actions") || argv.includes("--add-github-actions"));
+  const postCommitHook = options.postCommitHook ?? argv.includes("--post-commit-hook");
   const assumeYes = options.yes ?? (argv.includes("--yes") || argv.includes("-y"));
+
+  if (postCommitHook) {
+    try {
+      const hookPath = await installPostCommitHookOnly(cwd);
+      console.error(`[auto-doc-mcp] Post-commit hook installed at ${hookPath}`);
+      console.error("[auto-doc-mcp] Documentation will be evaluated after every git commit.");
+    } catch (error) {
+      console.error(`[auto-doc-mcp] Could not install post-commit hook: ${error instanceof Error ? error.message : String(error)}`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
 
   try {

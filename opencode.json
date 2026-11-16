@@ -1,0 +1,17 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      "auto-doc-mcp": {
+        "type": "local",
+        "command": [
+          "npx.cmd",
+          "-y",
+          "--package",
+          "auto-doc-mcp@latest",
+          "auto-docs-notion-mcp"
+        ]
+      }
+    }
+  }
+}

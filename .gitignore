@@ -9,6 +9,7 @@ coverage/
 .env
 .env.*
 !.env.example
+.auto-doc-mcp.json
 
 # Local/state files
 .auto-doc/
@@ -43,6 +44,10 @@ Microsoft/
 bifrost-assets/
 bifrost-data/
 license-keys/
+# License signing keys - never commit
+*.pem
+license-private.pem
+license-public.pem
 packages/jetbrains-plugin/.gradle-bootstrap/
 functional-tests/artifacts/
 functional-tests/.*.state.json

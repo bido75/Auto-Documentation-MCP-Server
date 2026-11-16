@@ -5,7 +5,7 @@ import { throwAsMcpToolError } from "../lib/mcp-error.js";
 import { executeAutonomousDocumentationTrigger } from "../orchestrator/auto-doc-orchestrator.js";
 
 export function registerRunAutonomousDocumentationTriggerTool(server: McpServer) {
-    server.tool("run_autonomous_documentation_trigger", "Runs autonomous documentation flow from local git changes through analyze and upsert.", {
+    server.tool("run_autonomous_documentation_trigger", "Chains the full 4-step documentation pipeline in one call: git diff summary -> AI analysis -> feature doc upsert -> Notion publish. Call this tool at the end of every coding session, after completing a feature, or whenever code changes should be reflected in the user/admin manuals. This is the primary tool for keeping Notion documentation up to date; capture_development_event alone does not write docs.", {
         projectId: z.string(),
         repoPath: z.string().optional(),
         mode: z.enum(["staged", "last_commit", "working_tree"]).default("working_tree"),
